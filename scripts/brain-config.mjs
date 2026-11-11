@@ -8,6 +8,8 @@
  *   lanesDir          the folder that holds lanes.json and one <slug>.md state file per lane. Keep it outside git.
  *                     `~` is the home folder.
  *   scheduledTasksDir the folder of scheduled task SKILL.md files (their runs pass the lane guard).
+ *   stateFile         { maxLines, doneDays }: a lane state file over maxLines (150) is flagged, and its "Done"
+ *                     items older than doneDays (7) are named for deletion, on each `lane: <slug>` (state-file.mjs).
  *   secondReader      { coveredFiles, verifyCommand, skill }: the JSON map of area -> covered paths (relative to
  *                     the project), the command that checks an area, and the skill a fresh reader follows.
  *
@@ -22,6 +24,7 @@ const DEFAULTS = {
   protectedBranch: 'main',
   lanesDir: null, // default: ~/.claude/lanes/<project folder name>
   scheduledTasksDir: '~/.claude/scheduled-tasks',
+  stateFile: { maxLines: 150, doneDays: 7 },
   secondReader: {
     coveredFiles: '.claude/covered-files.json',
     verifyCommand: null, // optional: a check that must pass before the read, e.g. a model checker
@@ -46,7 +49,12 @@ export function loadBrainConfig() {
   } catch {
     file = {}
   }
-  const cfg = { ...DEFAULTS, ...file, secondReader: { ...DEFAULTS.secondReader, ...(file.secondReader || {}) } }
+  const cfg = {
+    ...DEFAULTS,
+    ...file,
+    stateFile: { ...DEFAULTS.stateFile, ...(file.stateFile || {}) },
+    secondReader: { ...DEFAULTS.secondReader, ...(file.secondReader || {}) },
+  }
   cfg.lanesDir = path.resolve(home(cfg.lanesDir || path.join('~', '.claude', 'lanes', path.basename(root))))
   cfg.scheduledTasksDir = path.resolve(home(cfg.scheduledTasksDir))
   cfg.projectDir = root

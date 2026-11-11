@@ -13,7 +13,8 @@
  * Prefixes on the first message:
  *   new:          start a new session anyway.
  *   lane: <name>  this IS that lane's session (after a /clear). The hook passes and tells the model to read
- *                 the lane's state file first.
+ *                 the lane's state file first, then to trim it (the trim on clear, 0.3.0): delete finished work
+ *                 and old Done items, move rules that outlive the work out, and rewrite the file, never append.
  *
  * Exempt: scheduled task runs (their prompt is the task's SKILL.md body). It matches keywords in code, no model
  * call. It fails OPEN: any error of its own lets the message through.
@@ -24,6 +25,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { loadBrainConfig, escapeRegExp as escape } from './brain-config.mjs'
+import { inspectStateFile } from './state-file.mjs'
 
 const CONFIG = loadBrainConfig()
 const REGISTRY = process.env.LANE_REGISTRY || path.join(CONFIG.lanesDir, 'lanes.json')
@@ -68,6 +70,28 @@ function score(prompt, lane) {
   return (lane.keywords || []).filter((k) => new RegExp(`(^|[^a-z0-9])${escape(norm(k))}($|[^a-z0-9])`).test(p))
 }
 
+/**
+ * The trim on clear: what to cut from the state file before new work. A clear is the cheap moment to prune,
+ * since the model reads the whole file anyway. The checks are code (state-file.mjs); the cutting is the model's.
+ */
+function trimNote(file) {
+  let info = null
+  try { info = inspectStateFile(file, CONFIG.stateFile) } catch { info = null }
+  if (!info) return ''
+  const out = [
+    'Then trim it before new work, and REWRITE it (never append): delete finished items from Now, delete Decisions ' +
+      'the code no longer follows (check them), and move a rule that will outlive the current work to CLAUDE.md or ' +
+      'the docs, then delete it here.',
+  ]
+  if (info.staleDone.length) {
+    const shown = info.staleDone.slice(0, 8).map((r) => `  ${r.length > 140 ? r.slice(0, 140) + '...' : r}`)
+    out.push(`Delete these Done items, older than ${info.doneDays} days:`, ...shown)
+    if (info.staleDone.length > 8) out.push(`  ...and ${info.staleDone.length - 8} more.`)
+  }
+  if (info.overCap) out.push(`The file is ${info.lines} lines, over the cap of ${info.maxLines}: cut it below the cap.`)
+  return out.join('\n') + '\n'
+}
+
 function main() {
   let input
   try { input = JSON.parse(readFileSync(0, 'utf8')) } catch { return 0 }
@@ -83,10 +107,12 @@ function main() {
     const want = norm(laneCall[1]).split(' ').slice(0, 4).join(' ')
     const lane = lanes.find((l) => want.startsWith(norm(l.slug)) || want.startsWith(norm(l.name)))
     if (lane) {
+      const file = path.join(dir, `${lane.slug}.md`)
       // Exit 0 with stdout: the text is added to the model's context.
       process.stdout.write(
-        `This session is the "${lane.name}" lane. Before anything else, read its state file ${path.join(dir, `${lane.slug}.md`)}, ` +
+        `This session is the "${lane.name}" lane. Before anything else, read its state file ${file}, ` +
           'then CLAUDE.md rules that apply. Keep that file current at the end of each piece of work.\n' +
+          trimNote(file) +
           // 2026-11-10: a hook cannot set the title on UserPromptSubmit (only SessionStart has
           // sessionTitle, and it fires before this message names the lane), so the model does it.
           `If this session's title is not "${lane.title || lane.name}", rename it to that with ` +
