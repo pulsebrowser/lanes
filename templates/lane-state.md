@@ -2,8 +2,8 @@
 
 Last updated: <YYYY-MM-DD HH:MM TZ>
 
-<!-- Rewrite this file at each update; never append to the end. Keep it under 150 lines (stateFile.maxLines).
-     On each `lane: <slug>` the lane guard names what to cut. -->
+<!-- Rewrite this file at each update; never append to the end. Keep it under 12,000 characters (stateFile.maxChars),
+     one fact per bullet, each under 300 characters. On each `lane: <slug>` the lane guard names what to cut. -->
 
 ## Now
 - What is in progress, with the branch, the PR and the folder it lives in.

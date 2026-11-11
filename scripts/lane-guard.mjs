@@ -88,7 +88,12 @@ function trimNote(file) {
     out.push(`Delete these Done items, older than ${info.doneDays} days:`, ...shown)
     if (info.staleDone.length > 8) out.push(`  ...and ${info.staleDone.length - 8} more.`)
   }
-  if (info.overCap) out.push(`The file is ${info.lines} lines, over the cap of ${info.maxLines}: cut it below the cap.`)
+  if (info.overCap) {
+    out.push(`The file is ${info.chars.toLocaleString('en-US')} characters, over the cap of ${info.maxChars.toLocaleString('en-US')}: cut it below the cap (delete, do not merge lines).`)
+  }
+  if (info.longBullets) {
+    out.push(`${info.longBullets} bullet${info.longBullets === 1 ? ' is' : 's are'} over ${info.maxBulletChars} characters: one fact per bullet; cut each to its fact, or split it.`)
+  }
   return out.join('\n') + '\n'
 }
 
