@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Run long-lived Claude Code sessions as lanes: one session and one state file per kind of work, a guard that turns duplicate sessions away, a second reader for risky commits, and a protected-branch push guard.",
   "author": { "name": "Pulse Browser", "url": "https://pulse-browser.com" },
-  "homepage": "https://pulseos.finance/pulse-local/blog/one-person-six-lanes",
+  "homepage": "https://pulseos.finance/blog/one-person-six-lanes",
   "repository": "https://github.com/pulsebrowser/lanes",
   "license": "MIT",
   "keywords": ["lanes", "sessions", "memory", "hooks", "code-review", "solo-founder"]
