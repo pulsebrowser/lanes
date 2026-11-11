@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/lane-guard.mjs\"" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/second-reader-guard.mjs\"" },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/main-push-guard.mjs\"" },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/lane-pr-guard.mjs\"" }
+        ]
+      }
+    ]
+  }
+}

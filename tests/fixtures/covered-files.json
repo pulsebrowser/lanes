@@ -1,0 +1,4 @@
+{
+  "billing": ["lib/billing-service.ts"],
+  "briefs": ["app/api/briefs/"]
+}

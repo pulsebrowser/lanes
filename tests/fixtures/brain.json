@@ -1,0 +1,5 @@
+{
+  "owner": "Ada",
+  "protectedBranch": "main",
+  "secondReader": { "coveredFiles": "tests/fixtures/covered-files.json" }
+}

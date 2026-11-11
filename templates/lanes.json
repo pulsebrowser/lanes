@@ -1,0 +1,25 @@
+{
+  "lanes": [
+    {
+      "slug": "product",
+      "name": "Product",
+      "title": "Product",
+      "sessionId": null,
+      "keywords": ["checkout", "onboarding", "dashboard", "billing"]
+    },
+    {
+      "slug": "ops",
+      "name": "Ops",
+      "title": "Ops",
+      "sessionId": null,
+      "keywords": ["deploy", "server", "nginx", "dns", "cron"]
+    },
+    {
+      "slug": "brain-ci",
+      "name": "Brain and CI",
+      "title": "Brain and CI",
+      "sessionId": null,
+      "keywords": ["ci", "hook", "lint", "memory", "claude.md"]
+    }
+  ]
+}

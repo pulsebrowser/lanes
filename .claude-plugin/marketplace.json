@@ -1,0 +1,15 @@
+{
+  "name": "lanes",
+  "description": "Lanes for Claude Code: long-lived sessions with state files, guard hooks and a second reader.",
+  "owner": {
+    "name": "Pulse Browser",
+    "url": "https://pulse-browser.com"
+  },
+  "plugins": [
+    {
+      "name": "lanes",
+      "source": "./",
+      "description": "Long-lived Claude Code sessions as lanes, with state files, a lane guard, a second reader and a push guard."
+    }
+  ]
+}

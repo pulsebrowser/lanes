@@ -1,0 +1,4 @@
+{
+  "billing": ["src/billing/", "src/stripe-webhook.ts"],
+  "auth": ["src/auth/session.ts"]
+}
