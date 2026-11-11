@@ -12,7 +12,7 @@
  * It reads only the start of the transcript, and it fails quiet: on any error it prints nothing.
  *
  * Input: status line JSON on stdin ({ session_id, transcript_path, workspace: { project_dir }, cwd }).
- * When the lane's state file is over its cap (stateFile.maxLines, state-file.mjs), it adds ", state file N lines".
+ * When the lane's state file is over its cap (stateFile.maxChars, state-file.mjs), it adds ", state file 22k chars".
  * Env: LANE_REGISTRY (tests: path of lanes.json), LANES_STATUSLINE_FORMAT (default "lane: {name}"; also {slug}).
  */
 import { readFileSync, existsSync, openSync, readSync, closeSync } from 'node:fs'
@@ -68,7 +68,7 @@ async function main() {
   const line = format.replaceAll('{name}', lane.name || lane.slug).replaceAll('{slug}', lane.slug)
   let info = null
   try { info = inspectStateFile(path.join(path.dirname(registry), `${lane.slug}.md`), config.stateFile) } catch { info = null }
-  return info?.overCap ? `${line}, state file ${info.lines} lines` : line
+  return info?.overCap ? `${line}, state file ${Math.round(info.chars / 1000)}k chars` : line
 }
 
 main()

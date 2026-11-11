@@ -59,10 +59,10 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 A state file that only grows carries old decisions into work where they no longer apply. Two rules keep it small:
 
-- **A fixed shape, rewritten, with a cap.** Sections: Now, Waiting for the owner, Decisions to keep (dated, with the why), Done this week, Where things are ([`templates/lane-state.md`](templates/lane-state.md)). Each update rewrites the file; nothing is appended. The status line adds `, state file N lines` when the file is over the cap.
-- **A trim at every clear.** On `lane: <slug>`, the lane guard tells the model to trim the file before new work, and names the Done items older than 7 days and a file over the cap. The model deletes finished work, checks each decision against the code, and moves rules that will outlive the work to CLAUDE.md or the docs.
+- **A fixed shape, rewritten, with a cap.** Sections: Now, Waiting for the owner, Decisions to keep (dated, with the why), Done this week, Where things are ([`templates/lane-state.md`](templates/lane-state.md)). Each update rewrites the file; nothing is appended. One fact per bullet, under 300 characters. The cap is in characters, 12,000 (about 3,000 tokens), not lines: a line cap is dodged by merging bullets into one long line. The status line adds `, state file 22k chars` when the file is over the cap.
+- **A trim at every clear.** On `lane: <slug>`, the lane guard tells the model to trim the file before new work, and names the Done items older than 7 days, a file over the cap and the bullets over 300 characters. The model deletes finished work, checks each decision against the code, and moves rules that will outlive the work to CLAUDE.md or the docs.
 
-Both limits are in `.claude/brain.json`: `"stateFile": { "maxLines": 150, "doneDays": 7 }`. The monthly `dreaming` pass still does the deeper check.
+The limits are in `.claude/brain.json`: `"stateFile": { "maxChars": 12000, "maxBulletChars": 300, "doneDays": 7 }`. The monthly `dreaming` pass still does the deeper check.
 
 ## Status line: see which lane you are typing into
 

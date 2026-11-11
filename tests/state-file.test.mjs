@@ -22,7 +22,7 @@ const stateFile = (slug, done, extraLines = 0) => {
     '## Now', '- the release', '',
     '## Decisions to keep', '- 2026-01-01: an old decision stays, Done rules do not touch it', '',
     '## Done this week', ...done, '',
-    '## Where things are', ...Array.from({ length: extraLines }, (_, i) => `- line ${i}`),
+    '## Where things are', ...Array.from({ length: extraLines }, (_, i) => `- line ${i}: ${'a fact a fresh session needs. '.repeat(3)}`),
   ].join('\n') + '\n')
   return f
 }
@@ -33,9 +33,11 @@ beforeAll(() => {
   writeFileSync(registry, JSON.stringify({ lanes: [
     { slug: 'ops', name: 'Ops', sessionId: 'local_ops', keywords: ['deploy'] },
     { slug: 'big', name: 'Big', sessionId: 'local_big', keywords: ['huge'] },
+    { slug: 'long', name: 'Long', sessionId: 'local_long', keywords: ['wordy'] },
   ] }))
   stateFile('ops', [`- ${ago(1)}: shipped the fix (#12)`, `- ${ago(11)}: an old item (#9)`, `- ${ago(23)}: older (#4)`])
   stateFile('big', [`- ${ago(1)}: fresh`], 200)
+  stateFile('long', [`- ${ago(1)}: ${'a whole paragraph packed into one bullet. '.repeat(10)}`])
 })
 afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
 
@@ -52,13 +54,28 @@ describe('state file check', () => {
 
   it('takes its limits from the config', () => {
     expect(inspectStateFile(path.join(dir, 'ops.md'), { doneDays: 30 }, NOW).staleDone.length).toBe(0)
-    expect(inspectStateFile(path.join(dir, 'ops.md'), { maxLines: 5 }, NOW).overCap).toBe(true)
+    expect(inspectStateFile(path.join(dir, 'ops.md'), { maxChars: 50 }, NOW).overCap).toBe(true)
+    expect(inspectStateFile(path.join(dir, 'ops.md'), { maxBulletChars: 20 }, NOW).longBullets > 0).toBe(true)
+  })
+
+  it('cannot be dodged by merging lines: one huge bullet is still over the cap, and is a long bullet', () => {
+    const f = path.join(dir, 'merged.md')
+    writeFileSync(f, '## Now\n- ' + 'x'.repeat(13000) + '\n')
+    const r = inspectStateFile(f, {}, NOW)
+    expect(r.overCap).toBe(true)
+    expect(r.longBullets).toBe(1)
+  })
+
+  it('counts characters, not bytes', () => {
+    const f = path.join(dir, 'ja.md')
+    writeFileSync(f, '## Now\n- ' + '日本'.repeat(5000) + '\n') // 10,000 characters, 30,000 bytes
+    expect(inspectStateFile(f, {}, NOW).overCap).toBe(false)
   })
 
   it('flags a file over the cap and returns null for a missing file', () => {
     const r = inspectStateFile(path.join(dir, 'big.md'), {}, NOW)
     expect(r.overCap).toBe(true)
-    expect(r.maxLines).toBe(150)
+    expect(r.maxChars).toBe(12000)
     expect(inspectStateFile(path.join(dir, 'missing.md'))).toBe(null)
   })
 })
@@ -76,10 +93,17 @@ describe('trim on clear (lane guard)', () => {
     expect(r.stdout).toContain('an old item (#9)')
     expect(r.stdout).not.toContain('shipped the fix')
     expect(r.stdout).not.toContain('over the cap')
+    expect(r.stdout).not.toContain('bullet')
+  })
+
+  it('counts bullets over 300 characters', () => {
+    expect(guard('lane: long').stdout).toContain('1 bullet is over 300 characters')
   })
 
   it('says when the file is over the cap', () => {
-    expect(guard('lane: big').stdout).toContain('over the cap of 150')
+    const out = guard('lane: big').stdout
+    expect(out).toContain('over the cap of 12,000')
+    expect(out).toContain('delete, do not merge lines')
   })
 })
 
@@ -90,6 +114,7 @@ describe('status line flag', () => {
 
   it('adds the line count only when the file is over the cap', () => {
     expect(sl('local_ops')).toBe('lane: Ops')
-    expect(sl('local_big')).toContain('lane: Big, state file 2')
+    expect(sl('local_big')).toContain('lane: Big, state file ')
+    expect(sl('local_big')).toContain('k chars')
   })
 })
