@@ -1,6 +1,6 @@
 ---
 name: lanes
-description: Set up and run lanes, one long-lived Claude Code session and one state file per kind of work. Use when the user wants to set up lanes in a project, add or rename a lane, start or resume a lane session ("lane: <slug>"), clear a lane in place, or asks why a new session was stopped by the lane guard.
+description: 'Set up and run lanes, one long-lived Claude Code session and one state file per kind of work. Use when the user wants to set up lanes in a project, add or rename a lane, start or resume a lane session ("lane: <slug>"), clear a lane in place, or asks why a new session was stopped by the lane guard.'
 ---
 
 # Lanes
