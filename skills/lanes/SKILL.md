@@ -22,6 +22,7 @@ Session ids are local to one machine and the state changes every day. Keep both 
 3. Write `lanes.json`. Each lane gets a `slug`, a `name`, a `title` (the session title in the app), `sessionId: null` and 10 to 30 `keywords`: words that only that lane's work uses. Avoid words two lanes share; a tie lets the message through.
 4. Write one state file per lane from the template.
 5. Tell the user how to start each lane: open a new session, send `new: lane <slug>` as the first message, then put the session's id in `lanes.json`. In the Claude desktop app the id is `CLAUDE_CODE_HOST_SESSION_ID` (`local_...`).
+6. Offer the lane status line (README, "Status line"): it shows `lane: <name>` in the terminal. Add it to the user's settings only if they say yes, and keep any status line they already have.
 
 A lane with `sessionId: null` does not block anything.
 
