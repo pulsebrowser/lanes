@@ -16,3 +16,26 @@ jobs:
       - run: git config --global user.email ci@example.com && git config --global user.name ci && git config --global init.defaultBranch main
       - run: node --check scripts/*.mjs
       - run: node --test tests/*.test.mjs
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # GitHub renders SKILL.md front matter with strict YAML; Claude Code is lenient, so a bad one only shows on GitHub.
+      - name: Skill front matter parses as strict YAML
+        run: |
+          ruby -ryaml -e '
+            bad = 0
+            Dir["skills/*/SKILL.md"].each do |f|
+              parts = File.read(f).split(/^---\s*$/)
+              h = parts[0].strip.empty? && parts[1] ? YAML.safe_load(parts[1]) : nil
+              ok = h.is_a?(Hash) && h["name"].is_a?(String) && h["description"].is_a?(String)
+              puts "#{ok ? "ok " : "BAD"} #{f}"
+              bad += 1 unless ok
+            rescue Psych::Exception => e
+              puts "BAD #{f}: #{e.message}"; bad += 1
+            end
+            exit(bad.zero? ? 0 : 1)'
+      - name: JSON files parse
+        run: for f in $(git ls-files '*.json'); do node -e 'JSON.parse(require("fs").readFileSync(process.argv[1]))' "$f" || exit 1; echo "ok $f"; done
+      - name: Hook commands point to scripts that exist
+        run: grep -o 'scripts/[a-z-]*\.mjs' hooks/hooks.json | while read p; do test -f "$p" || { echo "MISSING $p"; exit 1; }; echo "ok $p"; done
