@@ -8,8 +8,9 @@
  *   lanesDir          the folder that holds lanes.json and one <slug>.md state file per lane. Keep it outside git.
  *                     `~` is the home folder.
  *   scheduledTasksDir the folder of scheduled task SKILL.md files (their runs pass the lane guard).
- *   stateFile         { maxLines, doneDays }: a lane state file over maxLines (150) is flagged, and its "Done"
- *                     items older than doneDays (7) are named for deletion, on each `lane: <slug>` (state-file.mjs).
+ *   stateFile         { maxChars, maxBulletChars, doneDays }: a lane state file over maxChars (12000, about 3000
+ *                     tokens) is flagged, bullets over maxBulletChars (300) are counted, and "Done" items older than
+ *                     doneDays (7) are named for deletion, on each `lane: <slug>` (state-file.mjs).
  *   secondReader      { coveredFiles, verifyCommand, skill }: the JSON map of area -> covered paths (relative to
  *                     the project), the command that checks an area, and the skill a fresh reader follows.
  *
@@ -24,7 +25,7 @@ const DEFAULTS = {
   protectedBranch: 'main',
   lanesDir: null, // default: ~/.claude/lanes/<project folder name>
   scheduledTasksDir: '~/.claude/scheduled-tasks',
-  stateFile: { maxLines: 150, doneDays: 7 },
+  stateFile: { maxChars: 12000, maxBulletChars: 300, doneDays: 7 },
   secondReader: {
     coveredFiles: '.claude/covered-files.json',
     verifyCommand: null, // optional: a check that must pass before the read, e.g. a model checker
