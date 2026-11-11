@@ -12,6 +12,7 @@
  * It reads only the start of the transcript, and it fails quiet: on any error it prints nothing.
  *
  * Input: status line JSON on stdin ({ session_id, transcript_path, workspace: { project_dir }, cwd }).
+ * When the lane's state file is over its cap (stateFile.maxLines, state-file.mjs), it adds ", state file N lines".
  * Env: LANE_REGISTRY (tests: path of lanes.json), LANES_STATUSLINE_FORMAT (default "lane: {name}"; also {slug}).
  */
 import { readFileSync, existsSync, openSync, readSync, closeSync } from 'node:fs'
@@ -49,7 +50,9 @@ async function main() {
   const project = input?.workspace?.project_dir || input?.cwd
   if (project && !process.env.CLAUDE_PROJECT_DIR) process.env.CLAUDE_PROJECT_DIR = project
   const { loadBrainConfig } = await import('./brain-config.mjs')
-  const registry = process.env.LANE_REGISTRY || path.join(loadBrainConfig().lanesDir, 'lanes.json')
+  const { inspectStateFile } = await import('./state-file.mjs')
+  const config = loadBrainConfig()
+  const registry = process.env.LANE_REGISTRY || path.join(config.lanesDir, 'lanes.json')
   if (!existsSync(registry)) return ''
   const { lanes = [] } = JSON.parse(readFileSync(registry, 'utf8'))
 
@@ -62,7 +65,10 @@ async function main() {
   if (!lane) return ''
 
   const format = process.env.LANES_STATUSLINE_FORMAT || 'lane: {name}'
-  return format.replaceAll('{name}', lane.name || lane.slug).replaceAll('{slug}', lane.slug)
+  const line = format.replaceAll('{name}', lane.name || lane.slug).replaceAll('{slug}', lane.slug)
+  let info = null
+  try { info = inspectStateFile(path.join(path.dirname(registry), `${lane.slug}.md`), config.stateFile) } catch { info = null }
+  return info?.overCap ? `${line}, state file ${info.lines} lines` : line
 }
 
 main()

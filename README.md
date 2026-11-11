@@ -55,6 +55,15 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 `lanes.json` lists your lanes. Each has a `slug`, a `name`, a `title`, a `sessionId` (`null` until the lane has a session) and `keywords` that only that lane's work uses. See [`templates/lanes.json`](templates/lanes.json).
 
+## Keeping state files small
+
+A state file that only grows carries old decisions into work where they no longer apply. Two rules keep it small:
+
+- **A fixed shape, rewritten, with a cap.** Sections: Now, Waiting for the owner, Decisions to keep (dated, with the why), Done this week, Where things are ([`templates/lane-state.md`](templates/lane-state.md)). Each update rewrites the file; nothing is appended. The status line adds `, state file N lines` when the file is over the cap.
+- **A trim at every clear.** On `lane: <slug>`, the lane guard tells the model to trim the file before new work, and names the Done items older than 7 days and a file over the cap. The model deletes finished work, checks each decision against the code, and moves rules that will outlive the work to CLAUDE.md or the docs.
+
+Both limits are in `.claude/brain.json`: `"stateFile": { "maxLines": 150, "doneDays": 7 }`. The monthly `dreaming` pass still does the deeper check.
+
 ## Status line: see which lane you are typing into
 
 `scripts/statusline.mjs` prints `lane: <name>` in a lane session and nothing elsewhere. It finds the lane by the session id in `lanes.json`, or by the session's first message (`lane: <slug>` or `new: lane <slug>`), so it still works after a `/clear` in the terminal. Idea from [@buswe_com](https://x.com/buswe_com).

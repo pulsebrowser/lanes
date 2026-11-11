@@ -3,6 +3,7 @@
   "protectedBranch": "main",
   "lanesDir": "~/.claude/lanes/my-project",
   "scheduledTasksDir": "~/.claude/scheduled-tasks",
+  "stateFile": { "maxLines": 150, "doneDays": 7 },
   "secondReader": {
     "coveredFiles": ".claude/covered-files.json",
     "verifyCommand": null,
