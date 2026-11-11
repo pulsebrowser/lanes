@@ -11,7 +11,7 @@ Lanes is the setup one founder uses to run a whole company's code with Claude Co
 - **A push guard.** A hook stops an agent's push to your protected branch, so every change goes through a pull request and CI. Free, for repos where GitHub branch protection is not available.
 - **A dreaming pass.** A monthly skill that checks your notes against the code, merges duplicates and lists rules that no longer carry load.
 
-The full story, with what worked and what did not: [One person, six lanes](https://pulse-browser.com/blog/one-person-six-lanes).
+The full story, with what worked and what did not: [One person, six lanes](https://pulseos.finance/pulse-local/blog/one-person-six-lanes).
 
 ## Install
 
