@@ -55,6 +55,23 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 `lanes.json` lists your lanes. Each has a `slug`, a `name`, a `title`, a `sessionId` (`null` until the lane has a session) and `keywords` that only that lane's work uses. See [`templates/lanes.json`](templates/lanes.json).
 
+## Status line: see which lane you are typing into
+
+`scripts/statusline.mjs` prints `lane: <name>` in a lane session and nothing elsewhere. It finds the lane by the session id in `lanes.json`, or by the session's first message (`lane: <slug>` or `new: lane <slug>`), so it still works after a `/clear` in the terminal. Idea from [@buswe_com](https://x.com/buswe_com).
+
+A plugin cannot set the status line, and the plugin's folder changes with each version, so add this to `~/.claude/settings.json` (or the project's `.claude/settings.json`). It runs the newest installed copy:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "sh -c 'for d in $(ls -d ~/.claude/plugins/cache/lanes/lanes/*/ 2>/dev/null | sort -rV); do [ -f \"${d}scripts/statusline.mjs\" ] && exec node \"${d}scripts/statusline.mjs\"; done; true'"
+  }
+}
+```
+
+`LANES_STATUSLINE_FORMAT` changes the text (default `lane: {name}`; `{slug}` also works). If you already have a status line, call the script from yours and print both. The status line shows in the terminal; the desktop app does not document one.
+
 ## What each hook does, and does not do
 
 | Hook | Event | Stops | Does not |
