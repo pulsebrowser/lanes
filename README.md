@@ -125,6 +125,12 @@ LANES_ORACLE=1 node --test tests/oracle.test.mjs
 
 No dependencies. Each hook runs in a temporary git repository with a made-up project config. The second line lets **git be the judge**: about 1,000 generated push and commit commands run for real against scratch repositories, and each guard must have stopped exactly the ones that moved the protected branch or committed a covered file. It takes a few minutes and runs in CI as its own job.
 
+```
+sh tests/live.sh
+```
+
+The live test runs the plugin in a **real Claude Code session**: Claude is asked to push to the protected branch, commit a covered file, start lane work in a new session and claim a lane, and the test checks on disk what happened. It first checks that Claude can answer, so a run where Claude never ran fails instead of passing. It needs a signed-in Claude Code and costs a few cents on Haiku, so it is not in CI: run it before a release. `LANES_FROM_GITHUB=1` tests the published plugin instead of this checkout.
+
 ## License
 
 MIT
