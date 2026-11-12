@@ -34,6 +34,7 @@ A second review of these fixes found problems in them, also fixed and tested:
 - A session that opens with a system note before the typed brief, a lane name with punctuation, and a slug with a dot now work.
 - New: `tests/oracle.test.mjs` runs about 1,000 generated push and commit commands for real and checks each verdict against what git did (0 misses), in CI as its own job.
 - README: what the guards are and are not (guard rails for an honest agent, not a security boundary).
+- The `second-reader` skill, from what this review taught: the reader RUNS a failing input when it can; each fixed finding gets a test that fails on the old code; and when findings changed code, the fix diff gets one more fresh read.
 
 **After updating:** if you use the status line, replace your `statusLine` command with the one in the README.
 
