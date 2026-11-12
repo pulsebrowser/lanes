@@ -17,63 +17,103 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
-import { loadBrainConfig } from './brain-config.mjs'
+import { loadBrainConfig, GIT_PREFIX } from './brain-config.mjs'
 
 const CONFIG = loadBrainConfig()
 const READER = CONFIG.secondReader
-const COMMIT = /(?:^|[\s;&|(])git((?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+)|\s+-c\s+\S+)*)\s+commit(?=\s|$)/
-const TRAILER = /(?:^|[\n"'])[ \t]*Second-Reader:[ \t]*[A-Za-z0-9]/
+const COMMIT = new RegExp(GIT_PREFIX + String.raw`commit(?=\s|$)`, 'g')
+const ADD = new RegExp(GIT_PREFIX + String.raw`add\s+([^;&|\n]+)`, 'g')
+// The trailer at a line start, after a quote, or after an escaped newline inside `printf '...\n...'`.
+const TRAILER = /(?:^|[\n"']|\\n)[ \t]*Second-Reader:[ \t]*[A-Za-z0-9]/
+// Options of `git commit` that take a value, so the value is not read as a path.
+const COMMIT_VALUE_OPTS = new Set(['-m', '--message', '-F', '--file', '-c', '-C', '--reuse-message', '--reedit-message',
+  '--author', '--date', '--fixup', '--squash', '-t', '--template', '--cleanup', '--trailer'])
 const unquote = (s) => s.replace(/^["']|["']$/g, '')
+const words = (s) => (s.match(/"[^"]*"|'[^']*'|\S+/g) || []).map(unquote)
+
+/** Where a git command at `index` runs: `git -C <dir>`, else the last `cd <dir>` before it, else the session's dir. */
+function dirFor(command, index, options, base) {
+  const dashC = /-C(?:=|\s+)("[^"]+"|'[^']+'|\S+)/.exec(options || '')
+  if (dashC) return path.resolve(base, unquote(dashC[1]))
+  const cds = [...command.slice(0, index).matchAll(/(?:^|[;&|(]\s*)cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/g)]
+  return cds.length ? path.resolve(base, unquote(cds[cds.length - 1][1])) : base
+}
+
+/** Checks ONE `git commit` of the command. Returns the covered files it would commit without a trailer, by area. */
+function check(command, hit, base, covered) {
+  const dir = dirFor(command, hit.index, hit[1], base)
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    .split('\n').map((l) => l.trim()).filter(Boolean)
+  // Paths as git sees them from the repository root, for pathspecs that are folders, globs or relative to a `cd`.
+  const changedUnder = (specs) => (specs.length ? git('ls-files', '-m', '-o', '--exclude-standard', '--full-name', '--', ...specs) : [])
+
+  const rest = command.slice(hit.index + hit[0].length)
+  const segment = rest.split(/[;&|\n]/)[0]
+  const files = new Set(git('diff', '--cached', '--name-only'))
+  // `git commit -a` also takes every tracked change.
+  if (/(?:^|\s)(-[a-zA-Z]*a[a-zA-Z]*|--all)(\s|$)/.test(segment)) git('diff', '--name-only').forEach((f) => files.add(f))
+  // `git commit <paths>` or `git commit -- <paths>` commits those paths.
+  const commitWords = words(segment)
+  const specs = []
+  for (let i = 0; i < commitWords.length; i++) {
+    const w = commitWords[i]
+    if (w === '--') { specs.push(...commitWords.slice(i + 1)); break }
+    if (COMMIT_VALUE_OPTS.has(w)) { i++; continue }
+    if (w.startsWith('-')) continue
+    if (existsSync(path.resolve(dir, w))) specs.push(w) // a word of a message is not a path on disk
+  }
+  changedUnder(specs).forEach((f) => files.add(f))
+  // `git add <paths> && git commit` in one command: the paths are not staged yet when this hook runs.
+  for (const add of command.slice(0, hit.index).matchAll(ADD)) {
+    const addDir = dirFor(command, add.index, add[1], base)
+    const tokens = words(add[2])
+    const all = tokens.some((t) => t === '-A' || t === '--all' || t === '-u' || t === '--update')
+    const paths = tokens.filter((t) => !t.startsWith('-'))
+    const found = execFileSync('git', ['ls-files', '-m', '-o', '--exclude-standard', '--full-name', '--', ...(all ? ['.'] : paths)],
+      { cwd: all ? dir : addDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    if (all || paths.length) found.split('\n').map((l) => l.trim()).filter(Boolean).forEach((f) => files.add(f))
+  }
+
+  const areas = new Map()
+  for (const f of files) {
+    for (const [area, entries] of Object.entries(covered)) {
+      if (!Array.isArray(entries)) continue
+      if (entries.some((e) => (e.endsWith('/') ? f.startsWith(e) || f + '/' === e : f === e))) {
+        areas.set(area, [...(areas.get(area) || []), f])
+      }
+    }
+  }
+  if (!areas.size) return null
+
+  // The message: in the command text AFTER this `git commit` (-m, a heredoc), or in the file given to -F.
+  let message = rest
+  const dashF = /\s(?:-F\s*|--file(?:=|\s+))("[^"]+"|'[^']+'|[^\s;&|]+)/.exec(' ' + segment)
+  if (dashF) {
+    const p = path.resolve(dir, unquote(dashF[1]))
+    if (existsSync(p)) message += '\n' + readFileSync(p, 'utf8')
+  }
+  return TRAILER.test(message) ? null : areas
+}
 
 function main() {
   let input
   try { input = JSON.parse(readFileSync(0, 'utf8')) } catch { return 0 }
   if (input?.tool_name !== 'Bash') return 0
   const command = String(input?.tool_input?.command ?? '')
-  const hit = COMMIT.exec(command)
-  if (!hit) return 0
+  const hits = [...command.matchAll(COMMIT)]
+  if (!hits.length) return 0
+  const coveredPath = path.resolve(CONFIG.projectDir, READER.coveredFiles)
+  if (!existsSync(coveredPath)) return 0
+  const covered = JSON.parse(readFileSync(coveredPath, 'utf8'))
+  const base = input.cwd || process.cwd()
 
-  // Where the commit runs: `git -C <dir>`, else the last `cd <dir>` before it, else the session's directory.
-  let dir = input.cwd || process.cwd()
-  const dashC = /-C\s+("[^"]+"|'[^']+'|\S+)/.exec(hit[1] || '')
-  const cds = [...command.slice(0, hit.index).matchAll(/(?:^|[;&|(]\s*)cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/g)]
-  if (dashC) dir = path.resolve(dir, unquote(dashC[1]))
-  else if (cds.length) dir = path.resolve(dir, unquote(cds[cds.length - 1][1]))
-
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    .split('\n').map((l) => l.trim()).filter(Boolean)
-
-  const covered = JSON.parse(readFileSync(path.resolve(CONFIG.projectDir, READER.coveredFiles), 'utf8'))
-  const files = new Set(git('diff', '--cached', '--name-only'))
-  // `git commit -a` also takes every tracked change.
-  if (/\scommit\b[^;&|]*\s(-[a-zA-Z]*a[a-zA-Z]*|--all)(\s|$)/.test(command)) git('diff', '--name-only').forEach((f) => files.add(f))
-  // `git add <paths> && git commit` in one command: the paths are not staged yet when this hook runs.
-  for (const add of command.slice(0, hit.index).matchAll(/(?:^|[\s;&|(])git(?:\s+-C\s+\S+)*\s+add\s+([^;&|\n]+)/g)) {
-    const tokens = add[1].trim().split(/\s+/).map(unquote)
-    if (tokens.some((t) => t === '-A' || t === '--all' || t === '.' || t === '-u' || t === '--update')) {
-      git('status', '--porcelain', '-uall').forEach((l) => files.add(l.slice(2).trim().split(' -> ').pop()))
-    }
-    tokens.filter((t) => !t.startsWith('-')).forEach((t) => files.add(t.replace(/^\.\//, '')))
+  // Every `git commit` in the command is checked, not only the first.
+  let areas = null
+  for (const hit of hits) {
+    areas = check(command, hit, base, covered)
+    if (areas) break
   }
-
-  const areas = new Map()
-  for (const f of files) {
-    for (const [area, entries] of Object.entries(covered)) {
-      if (entries.some((e) => (e.endsWith('/') ? f.startsWith(e) || f + '/' === e : f === e))) {
-        areas.set(area, [...(areas.get(area) || []), f])
-      }
-    }
-  }
-  if (!areas.size) return 0
-
-  // The message: in the command text (-m, a heredoc) or in the file given to -F.
-  let message = command
-  const dashF = /\s(?:-F|--file)[=\s]+("[^"]+"|'[^']+'|\S+)/.exec(command.slice(hit.index))
-  if (dashF) {
-    const p = path.resolve(dir, unquote(dashF[1]))
-    if (existsSync(p)) message += '\n' + readFileSync(p, 'utf8')
-  }
-  if (TRAILER.test(message)) return 0
+  if (!areas) return 0
 
   const lines = [...areas].map(([a, fs]) => `  ${a}: ${fs.slice(0, 4).join(', ')}${fs.length > 4 ? `, and ${fs.length - 4} more` : ''}`)
   process.stderr.write(

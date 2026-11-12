@@ -37,5 +37,11 @@ jobs:
             exit(bad.zero? ? 0 : 1)'
       - name: JSON files parse
         run: for f in $(git ls-files '*.json'); do node -e 'JSON.parse(require("fs").readFileSync(process.argv[1]))' "$f" || exit 1; echo "ok $f"; done
+      - name: The plugin version has a CHANGELOG entry
+        run: |
+          v=$(node -p 'require("./.claude-plugin/plugin.json").version')
+          top=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md | cut -c4-)
+          echo "plugin.json $v, CHANGELOG $top"
+          test "$v" = "$top"
       - name: Hook commands point to scripts that exist
         run: grep -o 'scripts/[a-z-]*\.mjs' hooks/hooks.json | while read p; do test -f "$p" || { echo "MISSING $p"; exit 1; }; echo "ok $p"; done

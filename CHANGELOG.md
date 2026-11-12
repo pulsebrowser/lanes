@@ -2,12 +2,30 @@
 
 ## Updating
 
+In Claude Code, then in a shell:
+
 ```
 /plugin marketplace update lanes
-/plugin update lanes@lanes
+claude plugin update lanes@lanes
 ```
 
-Then **restart each session**. Claude Code loads hooks when a session starts, so a running session keeps the old ones until it restarts. Read the "After updating" lines of each version you skipped.
+Then run `/reload-plugins` in each running session, or restart it: a session keeps the hooks it loaded until then. Read the "After updating" lines of each version you skipped.
+
+## 0.3.3 (2026-11-12)
+
+Fixes from an outside review; each one has a regression test (`tests/audit-033.test.mjs`).
+
+- `lane: <slug>` picked the first lane whose name was a PREFIX of the words, so `lane: web-api` could claim the lane `web` and overwrite its id. Now the longest whole-word match wins, punctuation ends a word, and lanes with an empty name or an unsafe slug (like `../x`) are skipped.
+- Two sessions claiming lanes at the same moment could lose one claim. The claim now takes a lock file and re-reads `lanes.json` before it writes.
+- The push guard missed `git push --all`, `--mirror`, `git --no-pager push`, `git --git-dir=... push`, `/usr/bin/git push` and `git push origin @` on the protected branch.
+- The second reader missed covered files reached by a pathspec commit (`git commit <file>`, `git commit -- <file>`), a folder or glob (`git add lib`), a path relative to a `cd`, and `git --no-pager commit`. Git now resolves those paths. It checks every `git commit` in a command, reads the trailer only after the commit (not from an `echo` before it), and reads `-F<file>` and `printf '...\n...'` messages.
+- The lane guard stopped a session mid-work when the same words were sent twice, treated a pasted first message that starts with `<` as not typed, and let any short first message through when a scheduled task used the same word. It now reads only the head of the transcript.
+- A value of the wrong type in `brain.json` (`"lanesDir": null`) made every hook fail on every call. Each key now falls back to its default.
+- The lane PR guard missed `gh -R owner/repo pr create` and a full path to `gh`.
+- Hooks have timeouts (5 s for the lane guard, 10 s for the others). The `dreaming` skill runs only when called by name.
+- The status line printed `$&` in a lane name as a pattern, and its settings line in the README broke on a home folder with a space. Use the new line from the README.
+
+**After updating:** if you use the status line, replace your `statusLine` command with the one in the README.
 
 ## 0.3.2 (2026-11-12)
 

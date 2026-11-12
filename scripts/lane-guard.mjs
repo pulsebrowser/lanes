@@ -25,9 +25,9 @@
  * Input: hook JSON on stdin ({ prompt, transcript_path, session_id }). Exit 2 blocks; stderr is shown to the user.
  * Env (tests): LANE_REGISTRY (path of lanes.json), LANE_TASKS_DIR (scheduled tasks folder).
  */
-import { readFileSync, existsSync, readdirSync, writeFileSync, renameSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync, writeFileSync, renameSync, openSync, readSync, closeSync, statSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
-import { loadBrainConfig, escapeRegExp as escape } from './brain-config.mjs'
+import { loadBrainConfig, escapeRegExp as escape, isSafeSlug } from './brain-config.mjs'
 import { inspectStateFile } from './state-file.mjs'
 
 const CONFIG = loadBrainConfig()
@@ -36,22 +36,42 @@ const TASKS_DIR = process.env.LANE_TASKS_DIR || CONFIG.scheduledTasksDir
 
 const norm = (s) => String(s).toLowerCase().replace(/\s+/g, ' ').trim()
 
-/** True when the transcript holds no earlier typed prompt (a new or just-cleared session). */
-function isFirstPrompt(transcriptPath, prompt) {
-  if (!transcriptPath || !existsSync(transcriptPath)) return true
-  const current = norm(prompt)
-  for (const line of readFileSync(transcriptPath, 'utf8').split('\n')) {
+const HEAD_BYTES = 256 * 1024
+// Lines the app writes as a user turn that the person did not type. Pasted HTML that starts with `<` is still typed.
+const WRAPPERS = /^<(?:command-|local-command|system-reminder|bash-|task-notification|user-prompt-submit-hook|cross-session-message|agent-message)/
+
+/** The typed prompts at the start of a transcript (JSONL), read from its first HEAD_BYTES only. */
+function typedPrompts(transcriptPath) {
+  const fd = openSync(transcriptPath, 'r')
+  const buf = Buffer.alloc(HEAD_BYTES)
+  const n = readSync(fd, buf, 0, HEAD_BYTES, 0)
+  closeSync(fd)
+  const out = []
+  for (const line of buf.subarray(0, n).toString('utf8').split('\n')) {
     if (!line.includes('"type":"user"')) continue
     let e
     try { e = JSON.parse(line) } catch { continue }
     if (e.type !== 'user' || e.isMeta || e.isCompactSummary) continue
     const c = e.message?.content
+    if (Array.isArray(c) && c.some((p) => p?.type === 'tool_result')) continue
     const text = typeof c === 'string' ? c : Array.isArray(c) ? c.filter((p) => p?.type === 'text').map((p) => p.text).join(' ') : ''
-    if (!text || (Array.isArray(c) && c.some((p) => p?.type === 'tool_result'))) continue
-    if (text.trimStart().startsWith('<')) continue // command and system wrappers, not typed prompts
-    if (norm(text) !== current) return false
+    if (!text || WRAPPERS.test(text.trimStart())) continue
+    out.push(norm(text))
   }
-  return true
+  return { prompts: out, truncated: n === HEAD_BYTES }
+}
+
+/**
+ * True when the session has no earlier typed prompt (a new or just-cleared session). The current prompt may already
+ * be the last line of the transcript, so ONE copy of it at the end is not an earlier prompt; any other typed prompt is,
+ * even the same words sent twice. Reads the head of the transcript only: a long session is cheap to check.
+ */
+function isFirstPrompt(transcriptPath, prompt) {
+  if (!transcriptPath || !existsSync(transcriptPath)) return true
+  const { prompts, truncated } = typedPrompts(transcriptPath)
+  if (truncated) return false // more than HEAD_BYTES of transcript: not a new session
+  if (prompts.length && prompts[prompts.length - 1] === norm(prompt)) prompts.pop()
+  return prompts.length === 0
 }
 
 /** True when the prompt is a scheduled task's own instructions. */
@@ -62,8 +82,9 @@ function isScheduledTask(prompt) {
     const f = path.join(TASKS_DIR, dir, 'SKILL.md')
     if (!existsSync(f)) continue
     const body = norm(readFileSync(f, 'utf8').replace(/^---[\s\S]*?\n---\n/, ''))
+    // Both sides at least 40 characters: a short prompt like "deploy" is not a task just because a task says "deploy".
     const head = body.slice(0, 120)
-    if (head && (p.includes(head) || body.includes(p.slice(0, 120)))) return true
+    if (head.length >= 40 && p.length >= 40 && (p.includes(head) || body.includes(p.slice(0, 120)))) return true
   }
   return false
 }
@@ -76,16 +97,58 @@ function score(prompt, lane) {
 /**
  * The claim: `lane: <slug>` in the desktop app makes THIS session the lane's session in lanes.json. Before 0.3.2 the
  * id was copied by hand and went stale when a session was replaced (the guard then pointed at an archived session).
- * Written to a temporary file and renamed, so a reader never sees half a file. Returns the old id, or null.
+ * Two sessions can claim at the same moment, so the write holds a lock file, RE-READS lanes.json under it, changes
+ * only this lane, and renames a temporary file into place (no reader sees half a file, no claim is lost).
+ * Returns the old id, or null when nothing changed or the lock was not had (the claim is then skipped: fail open).
  */
-function claimLane(registry, data, lane, me) {
-  if (!me || lane.sessionId === me) return null
-  const old = lane.sessionId || 'none'
-  lane.sessionId = me
-  const tmp = `${registry}.${process.pid}.tmp`
-  writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n')
-  renameSync(tmp, registry)
-  return old
+function claimLane(registry, slug, me) {
+  if (!me) return null
+  const lock = `${registry}.lock`
+  const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+  let fd = null
+  for (let i = 0; i < 50 && fd === null; i++) {
+    try { fd = openSync(lock, 'wx') } catch {
+      try { if (Date.now() - statSync(lock).mtimeMs > 5000) unlinkSync(lock) } catch { /* gone already */ }
+      sleep(10)
+    }
+  }
+  if (fd === null) return null
+  try {
+    const data = JSON.parse(readFileSync(registry, 'utf8'))
+    const lane = (data.lanes || []).find((l) => l?.slug === slug)
+    if (!lane || lane.sessionId === me) return null
+    const old = lane.sessionId || 'none'
+    lane.sessionId = me
+    const tmp = `${registry}.${process.pid}.tmp`
+    writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n')
+    renameSync(tmp, registry)
+    return old
+  } finally {
+    closeSync(fd)
+    try { unlinkSync(lock) } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Which lane `lane: <words>` names: the slug (or its words, `pulse-hosted` = `pulse hosted`) or the name, as whole
+ * words at the start. The LONGEST match wins, so `lane: web-api` is never the lane `web`. Lanes with an empty or
+ * unsafe slug (one that could leave the lanes folder, like `../x`) are skipped.
+ */
+function findLane(lanes, words) {
+  const want = norm(String(words).replace(/[,.;:!?()]/g, ' ')).split(' ').slice(0, 6).join(' ') // `lane: web-api, go`
+  const wantWords = want.replace(/-/g, ' ')
+  const starts = (text, key) => key && (text === key || text.startsWith(key + ' '))
+  let best = null
+  let bestLen = 0
+  for (const l of lanes) {
+    if (!isSafeSlug(l?.slug)) continue
+    const keys = [norm(l.slug), norm(l.slug).replace(/-/g, ' '), l.name ? norm(l.name) : '']
+    for (const k of keys) {
+      const hit = starts(want, k) || starts(wantWords, k.replace(/-/g, ' '))
+      if (hit && k.length > bestLen) { best = l; bestLen = k.length }
+    }
+  }
+  return best
 }
 
 /**
@@ -121,20 +184,19 @@ function main() {
   const prompt = String(input?.prompt ?? '')
   if (!prompt.trim() || !existsSync(REGISTRY)) return 0
   const data = JSON.parse(readFileSync(REGISTRY, 'utf8'))
-  const { lanes = [] } = data
+  const lanes = Array.isArray(data?.lanes) ? data.lanes : []
   const dir = path.dirname(REGISTRY)
 
   const lead = prompt.trimStart()
   if (/^new:/i.test(lead)) return 0
   const laneCall = /^lane:\s*([^\n]+)/i.exec(lead)
   if (laneCall) {
-    const want = norm(laneCall[1]).split(' ').slice(0, 4).join(' ')
-    const lane = lanes.find((l) => want.startsWith(norm(l.slug)) || want.startsWith(norm(l.name)))
+    const lane = findLane(lanes, laneCall[1])
     if (lane) {
       const file = path.join(dir, `${lane.slug}.md`)
       const me = process.env.CLAUDE_CODE_HOST_SESSION_ID
       let claimed = null
-      try { claimed = claimLane(REGISTRY, data, lane, me) } catch { claimed = null }
+      try { claimed = claimLane(REGISTRY, lane.slug, me) } catch { claimed = null }
       // Exit 0 with stdout: the text is added to the model's context.
       process.stdout.write(
         `This session is the "${lane.name}" lane. Before anything else, read its state file ${file}, ` +

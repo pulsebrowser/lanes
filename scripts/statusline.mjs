@@ -49,12 +49,13 @@ async function main() {
   // the status line runs outside the hook env: take the project from stdin before reading .claude/brain.json
   const project = input?.workspace?.project_dir || input?.cwd
   if (project && !process.env.CLAUDE_PROJECT_DIR) process.env.CLAUDE_PROJECT_DIR = project
-  const { loadBrainConfig } = await import('./brain-config.mjs')
+  const { loadBrainConfig, isSafeSlug } = await import('./brain-config.mjs')
   const { inspectStateFile } = await import('./state-file.mjs')
   const config = loadBrainConfig()
   const registry = process.env.LANE_REGISTRY || path.join(config.lanesDir, 'lanes.json')
   if (!existsSync(registry)) return ''
-  const { lanes = [] } = JSON.parse(readFileSync(registry, 'utf8'))
+  const data = JSON.parse(readFileSync(registry, 'utf8'))
+  const lanes = (Array.isArray(data?.lanes) ? data.lanes : []).filter((l) => isSafeSlug(l?.slug))
 
   const ids = [process.env.CLAUDE_CODE_HOST_SESSION_ID, input?.session_id].filter(Boolean)
   let lane = lanes.find((l) => l?.sessionId && ids.includes(l.sessionId))
@@ -65,7 +66,8 @@ async function main() {
   if (!lane) return ''
 
   const format = process.env.LANES_STATUSLINE_FORMAT || 'lane: {name}'
-  const line = format.replaceAll('{name}', lane.name || lane.slug).replaceAll('{slug}', lane.slug)
+  // Functions as replacements: a `$&` in a lane name is text, not a pattern.
+  const line = format.replaceAll('{name}', () => String(lane.name || lane.slug)).replaceAll('{slug}', () => lane.slug)
   let info = null
   try { info = inspectStateFile(path.join(path.dirname(registry), `${lane.slug}.md`), config.stateFile) } catch { info = null }
   return info?.overCap ? `${line}, state file ${Math.round(info.chars / 1000)}k chars` : line

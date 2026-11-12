@@ -7,8 +7,9 @@
  * is the free half: it stops an AGENT's `git push` that writes to the protected branch. A push typed by a person in
  * a terminal does not go through it.
  *
- * Stopped: `git push <remote> <branch>`, `... HEAD:<branch>`, `... <ref>:<branch>`, `... refs/heads/<branch>`, and a
- * bare `git push` (or `git push <remote>`) while the current branch is the protected one.
+ * Stopped: `git push <remote> <branch>`, `... HEAD:<branch>`, `... <ref>:<branch>`, `... refs/heads/<branch>`,
+ * `--all` and `--mirror` (they push every branch), and a bare `git push` (or `git push <remote>`, `... HEAD`, `... @`)
+ * while the current branch is the protected one. Any git prefix counts: `/usr/bin/git`, `git --no-pager`, `-C <dir>`.
  * The owner's word for one push: put the comment `# main-push: <owner>'s word` in the same command.
  * The branch and the owner come from .claude/brain.json (`protectedBranch`, `owner`).
  * It fails OPEN: on any error of its own the push goes through.
@@ -18,10 +19,10 @@
 import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
-import { loadBrainConfig, escapeRegExp } from './brain-config.mjs'
+import { loadBrainConfig, escapeRegExp, GIT_PREFIX } from './brain-config.mjs'
 
 const { owner: OWNER, protectedBranch: BRANCH } = loadBrainConfig()
-const PUSH = /(?:^|[\s;&|(])git((?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+)|\s+-c\s+\S+)*)\s+push\b([^;&|\n]*)/g
+const PUSH = new RegExp(GIT_PREFIX + String.raw`push\b([^;&|\n]*)`, 'g')
 const OVERRIDE = new RegExp(`#\\s*main-push:\\s*${escapeRegExp(OWNER)}'s word`, 'i')
 const unquote = (s) => s.replace(/^["']|["']$/g, '')
 
@@ -36,6 +37,7 @@ function currentBranch(dir) {
 /** True when this push's arguments write to the protected branch. */
 function pushesMain(args, branch) {
   const words = args.trim().split(/\s+/).filter(Boolean).map(unquote)
+  if (words.includes('--all') || words.includes('--mirror')) return true // every branch, the protected one too
   const positional = []
   for (let i = 0; i < words.length; i++) {
     const w = words[i]
@@ -47,7 +49,7 @@ function pushesMain(args, branch) {
   if (refspecs.length === 0) return branch === BRANCH && !words.includes('--tags') // `git push --tags` sends tags only
   return refspecs.some((r) => {
     const dst = (r.includes(':') ? r.split(':').pop() : r).replace(/^\+/, '')
-    return dst === BRANCH || dst === `refs/heads/${BRANCH}` || (dst === 'HEAD' && branch === BRANCH)
+    return dst === BRANCH || dst === `refs/heads/${BRANCH}` || ((dst === 'HEAD' || dst === '@') && branch === BRANCH)
   })
 }
 

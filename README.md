@@ -15,6 +15,8 @@ The full story, with what worked and what did not: [One person, six lanes](https
 
 ## Install
 
+Requires Node.js 20 or later on your `PATH`: the hooks are Node scripts. Without Node they cannot run, and the guards do nothing.
+
 In Claude Code:
 
 ```
@@ -26,7 +28,7 @@ Then ask Claude to set up lanes in your project (the `lanes:lanes` skill walks t
 
 In the Claude desktop app, each lane session then turns off its own archive switch once (see "Lanes are never archived").
 
-**Updating:** `/plugin marketplace update lanes`, then `/plugin update lanes@lanes`, then restart your sessions (hooks load when a session starts). What changed, and what to do after each version: [CHANGELOG.md](CHANGELOG.md).
+**Updating:** `/plugin marketplace update lanes` in Claude Code, then `claude plugin update lanes@lanes` in a shell, then `/reload-plugins` in each running session (or restart it). What changed, and what to do after each version: [CHANGELOG.md](CHANGELOG.md).
 
 To work on the plugin itself, clone it and run `claude --plugin-dir ./lanes`.
 
@@ -65,9 +67,11 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 ## Lanes are never archived
 
-The Claude desktop app can archive a session when a PR it touched closes (Settings: "Auto-archive sessions when their pull request closes"). That suits a task session and kills a lane. The app copies the setting into each session as the switch `auto_archive_on_close`, and **only the session can turn its own copy off**: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`. Unbinding the PR does not change it.
+The Claude desktop app can archive a session when a PR it touched merges or closes (its auto-archive setting, in Settings, under Claude Code). That suits a task session and kills a lane. The app copies the setting into each session as the switch `auto_archive_on_close`, and **only the session can turn its own copy off**: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`. Unbinding the PR does not change it.
 
-Each `lane: <slug>` reminds the model to check the switch, and claims the lane in `lanes.json` for that session, so a replaced or restored session never leaves a stale id behind. Tested on a real lane: switch off, PR closed, session still active.
+Each `lane: <slug>` reminds the model to check the switch, and claims the lane in `lanes.json` for that session, so a replaced or restored session never leaves a stale id behind. Tested on 2026-11-12 on six lanes: switch off, a PR closed, every session still active.
+
+**What this relies on.** The per-session switch, the `mcp__ccd_*` tools and the `local_...` session id in `CLAUDE_CODE_HOST_SESSION_ID` are internals of the Claude desktop app. Anthropic does not document them (checked 2026-11-12), so they can change. Where they are missing, these steps are skipped: the lane guard and the lane PR guard do nothing outside the desktop app, and the account setting applies as usual.
 
 ## Keeping state files small
 
@@ -88,12 +92,12 @@ A plugin cannot set the status line, and the plugin's folder changes with each v
 {
   "statusLine": {
     "type": "command",
-    "command": "sh -c 'for d in $(ls -d ~/.claude/plugins/cache/lanes/lanes/*/ 2>/dev/null | sort -rV); do [ -f \"${d}scripts/statusline.mjs\" ] && exec node \"${d}scripts/statusline.mjs\"; done; true'"
+    "command": "sh -c 'exec 3<&0; r=\"$HOME/.claude/plugins/cache/lanes/lanes\"; ls -1 \"$r\" 2>/dev/null | sort -rV | while read -r v; do if [ -f \"$r/$v/scripts/statusline.mjs\" ]; then node \"$r/$v/scripts/statusline.mjs\" <&3; exit; fi; done; true'"
   }
 }
 ```
 
-`LANES_STATUSLINE_FORMAT` changes the text (default `lane: {name}`; `{slug}` also works). If you already have a status line, call the script from yours and print both. The status line shows in the terminal; the desktop app does not document one.
+It reads the plugin cache under `~/.claude/plugins`; if you set `CLAUDE_CODE_PLUGIN_CACHE_DIR`, change the path in the line. On Windows it needs `sh` (Git Bash). `LANES_STATUSLINE_FORMAT` changes the text (default `lane: {name}`; `{slug}` also works). If you already have a status line, call the script from yours and print both. The status line shows in the terminal; the desktop app does not document one.
 
 ## What each hook does, and does not do
 
@@ -104,11 +108,11 @@ A plugin cannot set the status line, and the plugin's folder changes with each v
 | `main-push-guard.mjs` | PreToolUse (Bash) | An agent's push that writes to the protected branch | Stop a push you type in a terminal. Use server-side protection for that. |
 | `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (Claude desktop app only) | Anything outside the desktop app. The real fix is the session's own switch: see "Lanes are never archived". |
 
-Every hook fails open: an error of its own lets the action through. A guard that breaks your work is worse than no guard.
+Every hook fails open: an error of its own, or a value of the wrong type in `brain.json`, lets the action through. Each hook also has a timeout (5 s for the lane guard, 10 s for the others), so a hung `git` call cannot stall your session. A guard that breaks your work is worse than no guard.
 
 ## Prior art
 
-These ideas are not new on their own. Anthropic's [long-running agent harness](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) keeps a progress file between sessions; [Letta's sleep-time compute](https://www.letta.com/blog/sleep-time-compute) consolidates memory away from live work; [pstack](https://github.com/cursor/plugins/tree/main/pstack) by Lauren Tan routes each task to the right playbook; [agent-skills](https://github.com/addyosmani/agent-skills) by Addy Osmani packages engineering workflows as skills. What Lanes adds is the combination: a fixed registry of long-lived sessions, one state file each, and a hook that turns a duplicate session away at its first message.
+These ideas are not new on their own. Anthropic's [long-running agent harness](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) keeps a progress file between sessions; [Letta's sleep-time compute](https://www.letta.com/blog/sleep-time-compute) consolidates memory away from live work; [pstack](https://github.com/cursor/plugins/tree/main/pstack) by Lauren Tan (poteto) routes each task to the right playbook; [agent-skills](https://github.com/addyosmani/agent-skills) by Addy Osmani packages engineering workflows as skills. What Lanes adds is the combination: a fixed registry of long-lived sessions, one state file each, and a hook that turns a duplicate session away at its first message.
 
 ## Tests
 
