@@ -21,8 +21,9 @@ Session ids are local to one machine and the state changes every day. Keep both 
 2. Write `.claude/brain.json` with the owner's name, the protected branch and `lanesDir`.
 3. Write `lanes.json`. Each lane gets a `slug`, a `name`, a `title` (the session title in the app), `sessionId: null` and 10 to 30 `keywords`: words that only that lane's work uses. Avoid words two lanes share; a tie lets the message through.
 4. Write one state file per lane from the template.
-5. Tell the user how to start each lane: open a new session, send `new: lane <slug>` as the first message, then put the session's id in `lanes.json`. In the Claude desktop app the id is `CLAUDE_CODE_HOST_SESSION_ID` (`local_...`).
-6. Offer the lane status line (README, "Status line"): it shows `lane: <name>` in the terminal. Add it to the user's settings only if they say yes, and keep any status line they already have.
+5. Tell the user how to start each lane: open a new session and send `lane: <slug>` as the first message. In the Claude desktop app the lane guard then writes the session's id (`CLAUDE_CODE_HOST_SESSION_ID`, `local_...`) into `lanes.json` itself. In the terminal, put the id in `lanes.json` by hand, or rely on the status line's first-message match.
+6. In the desktop app, each lane session turns off its own archive switch on day one: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`, checked with `mcp__ccd_pr__get_status`. The account setting "archive sessions when their PR closes" is copied into every new session, and only the session can change its copy. Unbinding a PR does not change it.
+7. Offer the lane status line (README, "Status line"): it shows `lane: <name>` in the terminal. Add it to the user's settings only if they say yes, and keep any status line they already have.
 
 A lane with `sessionId: null` does not block anything.
 
@@ -38,7 +39,7 @@ The hook `lane-guard.mjs` reads the FIRST message of a new session. When the mes
 1. At the end of each piece of work, REWRITE the lane's state file (never append to the end): Now, Waiting for the owner, Decisions to keep, Done this week, Where things are. Move what finished from Now to Done this week, as `- YYYY-MM-DD: ...`. Write it for a reader who knows nothing about the conversation. One fact per bullet, under 300 characters. Keep the file under the cap (`stateFile.maxChars`, 12,000 characters, about 3,000 tokens).
 2. When the context gets long, or the session starts to repeat old facts: update the state file, then clear the session IN PLACE (`/clear`). Same row, same title. The next message is `lane: <slug>`.
 3. Rules that hold for every session go to CLAUDE.md or memory, not to the state file. The state file holds what is in progress.
-4. A lane session is never archived. In the desktop app, a session that owns a pull request is archived when the PR closes, so a lane session must not own one. The hook `lane-pr-guard.mjs` stops `gh pr create` in a lane session. Open the PR from a task session, or add `# lane-pr: unbind` to the command and unbind the PR at once.
+4. A lane session is never archived. In the desktop app, a session is archived when a PR it touched closes, unless its own `auto_archive_on_close` switch is off (setup step 6; every `lane: <slug>` reminds the model to check it). With the switch off, a lane may open PRs: add `# lane-pr: ok` to `gh pr create`. The hook `lane-pr-guard.mjs` stops `gh pr create` without that comment, as a backup for a lane whose switch is still on.
 
 ## When a task is not lane work
 

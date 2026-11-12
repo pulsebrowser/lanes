@@ -55,6 +55,12 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 `lanes.json` lists your lanes. Each has a `slug`, a `name`, a `title`, a `sessionId` (`null` until the lane has a session) and `keywords` that only that lane's work uses. See [`templates/lanes.json`](templates/lanes.json).
 
+## Lanes are never archived
+
+The Claude desktop app can archive a session when a PR it touched closes (Settings: "Auto-archive sessions when their pull request closes"). That suits a task session and kills a lane. The app copies the setting into each session as the switch `auto_archive_on_close`, and **only the session can turn its own copy off**: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`. Unbinding the PR does not change it.
+
+Each `lane: <slug>` reminds the model to check the switch, and claims the lane in `lanes.json` for that session, so a replaced or restored session never leaves a stale id behind. Tested on a real lane: switch off, PR closed, session still active.
+
 ## Keeping state files small
 
 A state file that only grows carries old decisions into work where they no longer apply. Two rules keep it small:
@@ -88,7 +94,7 @@ A plugin cannot set the status line, and the plugin's folder changes with each v
 | `lane-guard.mjs` | UserPromptSubmit | The first message of a new session that matches a lane with a session | Call a model. It matches keywords in code. A tie between two lanes passes. |
 | `second-reader-guard.mjs` | PreToolUse (Bash) | `git commit` of a covered file without a `Second-Reader:` line | Prove that the read happened. The line is the session's statement. |
 | `main-push-guard.mjs` | PreToolUse (Bash) | An agent's push that writes to the protected branch | Stop a push you type in a terminal. Use server-side protection for that. |
-| `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session (Claude desktop app only) | Anything outside the desktop app. |
+| `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (Claude desktop app only) | Anything outside the desktop app. The real fix is the session's own switch: see "Lanes are never archived". |
 
 Every hook fails open: an error of its own lets the action through. A guard that breaks your work is worse than no guard.
 
