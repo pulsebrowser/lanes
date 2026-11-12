@@ -197,3 +197,64 @@ describe('status line text', () => {
     expect(hook('statusline.mjs', { session_id: 'sid' }, { LANE_REGISTRY: registry }).stdout.trim()).toBe('lane: R$&D')
   })
 })
+
+describe('second review (0.3.3)', () => {
+  it('a trailer after the commit, or in a later commit, does not count', () => {
+    const repo = path.join(tmp, 'reader2')
+    const g = (...a) => execFileSync('git', a, { cwd: repo, stdio: 'ignore' })
+    mkdirSync(path.join(repo, 'lib'), { recursive: true }); g('init', '-q')
+    writeFileSync(path.join(repo, 'lib/billing.ts'), 'a\n'); g('add', '.'); g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'a')
+    writeFileSync(path.join(repo, 'lib/billing.ts'), 'b\n'); g('add', '.')
+    const covered = path.join(tmp, 'covered2.json'); writeFileSync(covered, JSON.stringify({ billing: ['lib/billing.ts'] }))
+    const cfg = path.join(tmp, 'brain2.json'); writeFileSync(cfg, JSON.stringify({ secondReader: { coveredFiles: covered } }))
+    const run = (c) => hook('second-reader-guard.mjs', bash(c, repo), { BRAIN_CONFIG: cfg }).status
+    expect(run('git commit -m fix && echo "Second-Reader: x"')).toBe(2)
+    expect(run('git commit -m a && git commit --allow-empty -m "b\nSecond-Reader: x"')).toBe(2)
+    expect(run(`git commit -m "$(cat <<'EOF'\nfix\n\nSecond-Reader: fresh agent\nEOF\n)"`)).toBe(0)
+    expect(run('git commit -F - <<EOF\nfix\nSecond-Reader: fresh agent\nEOF')).toBe(0)
+    expect(run('git commit -m "a; b" -m "Second-Reader: ok" ; ls')).toBe(0)
+  })
+
+  it('a long run of options is checked in well under a second (no exponential backtracking)', () => {
+    for (const [name, command] of [['lane-pr-guard.mjs', 'gh' + ' --repo=a'.repeat(5000) + ' x'], ['main-push-guard.mjs', 'git' + ' --git-dir=a'.repeat(5000) + ' x']]) {
+      const started = Date.now()
+      const r = hook(name, bash(command), { LANE_REGISTRY: path.join(tmp, 'pr', 'lanes.json'), CLAUDE_CODE_HOST_SESSION_ID: 'local_ops' })
+      expect(r.status).toBe(0)
+      expect(Date.now() - started < 2000).toBe(true)
+    }
+  })
+
+  it('a dead process lock older than 5 s is taken over, and a fresh one only delays the claim', () => {
+    const registry = path.join(tmp, 'lock', 'lanes.json')
+    mkdirSync(path.dirname(registry), { recursive: true })
+    writeFileSync(registry, JSON.stringify({ lanes: [{ slug: 'a', name: 'A', sessionId: 'old' }] }))
+    writeFileSync(registry + '.lock', 'dead')
+    const old = (Date.now() - 10_000) / 1000
+    execFileSync('touch', ['-t', new Date(old * 1000).toISOString().replace(/[-:T]/g, '').slice(0, 12), registry + '.lock'])
+    const r = hook('lane-guard.mjs', { prompt: 'lane: a', session_id: 'x' }, { LANE_REGISTRY: registry, CLAUDE_CODE_HOST_SESSION_ID: 'local_new' })
+    expect(r.status).toBe(0)
+    expect(JSON.parse(readFileSync(registry, 'utf8')).lanes[0].sessionId).toBe('local_new')
+    expect(spawnSync('ls', [path.dirname(registry)], { encoding: 'utf8' }).stdout).not.toContain('.lock')
+  })
+
+  it('a session that opens with a system note before the typed brief is not new on its next prompt', () => {
+    const dir = path.join(tmp, 'note'); mkdirSync(dir, { recursive: true })
+    const registry = path.join(dir, 'lanes.json')
+    writeFileSync(registry, JSON.stringify({ lanes: [{ slug: 'ops', name: 'Ops', sessionId: 'local_ops', keywords: ['deploy'] }] }))
+    const t = path.join(dir, 't.jsonl')
+    writeFileSync(t, [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: '<system-reminder>context</system-reminder>' }, { type: 'text', text: 'new: fix the footer' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'now deploy it' } }),
+    ].join('\n') + '\n')
+    expect(hook('lane-guard.mjs', { prompt: 'now deploy it', session_id: 'x', transcript_path: t }, { LANE_REGISTRY: registry }).status).toBe(0)
+  })
+
+  it('punctuation in a lane name, and a dot in a slug, still match', () => {
+    const registry = path.join(tmp, 'punct', 'lanes.json')
+    mkdirSync(path.dirname(registry), { recursive: true })
+    writeFileSync(registry, JSON.stringify({ lanes: [{ slug: 'ops', name: 'Ops (side)', sessionId: null }, { slug: 'v1.2', name: 'Release', sessionId: null }] }))
+    const run = (p) => hook('lane-guard.mjs', { prompt: p, session_id: 'x' }, { LANE_REGISTRY: registry }).stdout
+    expect(run('lane: Ops (side)')).toContain('"Ops (side)" lane')
+    expect(run('lane: v1.2')).toContain('"Release" lane')
+  })
+})

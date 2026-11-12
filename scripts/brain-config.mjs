@@ -76,14 +76,17 @@ export function loadBrainConfig() {
   return cfg
 }
 
-/** A lane slug that is safe to use in a file name: letters, digits, `_` and `-`, no path parts. */
-export const isSafeSlug = (s) => typeof s === 'string' && /^[a-z0-9][\w-]*$/i.test(s)
+/** A lane slug that is safe to use in a file name: letters, digits, `_`, `-` and `.`, never `..`, no path parts. */
+export const isSafeSlug = (s) => typeof s === 'string' && /^[a-z0-9][\w.-]*$/i.test(s) && !s.includes('..')
 
 /**
  * The start of a `git` command, for the Bash guards: `git`, `/usr/bin/git`, with any global options
  * (`-C <dir>`, `-c k=v`, `--git-dir=.git`, `--no-pager`) before the subcommand. Group 1 holds the options.
+ * The two option branches never match the same text (the second refuses the names the first takes), so a long run of
+ * options has ONE way to match: no exponential backtracking on a hostile command (0.3.3 second review).
  */
-export const GIT_PREFIX = String.raw`(?:^|[\s;&|(])(?:[^\s;&|()]*\/)?git((?:\s+(?:-C|-c|--git-dir|--work-tree|--namespace)(?:=|\s+)(?:"[^"]+"|'[^']+'|\S+)|\s+--?[a-zA-Z][\w-]*(?:=\S+)?)*)\s+`
+const TAKES_VALUE = String.raw`(?:-C|-c|--git-dir|--work-tree|--namespace)`
+export const GIT_PREFIX = String.raw`(?:^|[\s;&|(])(?:[^\s;&|()]*\/)?git((?:\s+${TAKES_VALUE}(?:=|\s+)(?:"[^"]+"|'[^']+'|\S+)|\s+(?!${TAKES_VALUE}(?:=|\s|$))--?[a-zA-Z][\w-]*(?:=\S+)?)*)\s+`
 
 /** A string as a literal inside a RegExp. */
 export const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

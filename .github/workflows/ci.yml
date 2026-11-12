@@ -16,6 +16,19 @@ jobs:
       - run: git config --global user.email ci@example.com && git config --global user.name ci && git config --global init.defaultBranch main
       - run: node --check scripts/*.mjs
       - run: node --test tests/*.test.mjs
+  oracle:
+    # Git is the judge: ~1,000 generated push and commit commands RUN against scratch repositories, and each guard's
+    # verdict must match what git did (tests/oracle.test.mjs). One Node version; it takes a few minutes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: git config --global user.email ci@example.com && git config --global user.name ci && git config --global init.defaultBranch main
+      - run: node --test tests/oracle.test.mjs
+        env:
+          LANES_ORACLE: '1'
   manifests:
     runs-on: ubuntu-latest
     steps:

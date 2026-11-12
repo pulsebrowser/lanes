@@ -54,8 +54,10 @@ function typedPrompts(transcriptPath) {
     if (e.type !== 'user' || e.isMeta || e.isCompactSummary) continue
     const c = e.message?.content
     if (Array.isArray(c) && c.some((p) => p?.type === 'tool_result')) continue
-    const text = typeof c === 'string' ? c : Array.isArray(c) ? c.filter((p) => p?.type === 'text').map((p) => p.text).join(' ') : ''
-    if (!text || WRAPPERS.test(text.trimStart())) continue
+    // Each text block on its own: a session started from another one opens with [a system note, the typed brief].
+    const blocks = typeof c === 'string' ? [c] : Array.isArray(c) ? c.filter((p) => p?.type === 'text').map((p) => String(p.text ?? '')) : []
+    const text = blocks.filter((b) => !WRAPPERS.test(b.trimStart())).join(' ')
+    if (!text.trim()) continue
     out.push(norm(text))
   }
   return { prompts: out, truncated: n === HEAD_BYTES }
@@ -104,11 +106,20 @@ function score(prompt, lane) {
 function claimLane(registry, slug, me) {
   if (!me) return null
   const lock = `${registry}.lock`
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
   const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
   let fd = null
   for (let i = 0; i < 50 && fd === null; i++) {
-    try { fd = openSync(lock, 'wx') } catch {
-      try { if (Date.now() - statSync(lock).mtimeMs > 5000) unlinkSync(lock) } catch { /* gone already */ }
+    try { fd = openSync(lock, 'wx'); writeFileSync(fd, token) } catch {
+      // A lock older than 5 s was left by a process that died. Rename it away first: only ONE waiter's rename can
+      // succeed, so two waiters never both delete it and then both take a new lock.
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > 5000) {
+          const gone = `${lock}.stale.${token}`
+          renameSync(lock, gone)
+          unlinkSync(gone)
+        }
+      } catch { /* another waiter got there first */ }
       sleep(10)
     }
   }
@@ -125,7 +136,8 @@ function claimLane(registry, slug, me) {
     return old
   } finally {
     closeSync(fd)
-    try { unlinkSync(lock) } catch { /* ignore */ }
+    // Release only our own lock: if a waiter took a stale one over, the file holds its token, not ours.
+    try { if (readFileSync(lock, 'utf8') === token) unlinkSync(lock) } catch { /* ignore */ }
   }
 }
 
@@ -135,14 +147,16 @@ function claimLane(registry, slug, me) {
  * unsafe slug (one that could leave the lanes folder, like `../x`) are skipped.
  */
 function findLane(lanes, words) {
-  const want = norm(String(words).replace(/[,.;:!?()]/g, ' ')).split(' ').slice(0, 6).join(' ') // `lane: web-api, go`
+  // Punctuation ends a word, on BOTH sides: `lane: web-api, go`, and a lane named "Ops (side)".
+  const clean = (t) => norm(String(t).replace(/[,.;:!?()]/g, ' '))
+  const want = clean(words)
   const wantWords = want.replace(/-/g, ' ')
   const starts = (text, key) => key && (text === key || text.startsWith(key + ' '))
   let best = null
   let bestLen = 0
   for (const l of lanes) {
     if (!isSafeSlug(l?.slug)) continue
-    const keys = [norm(l.slug), norm(l.slug).replace(/-/g, ' '), l.name ? norm(l.name) : '']
+    const keys = [clean(l.slug), clean(l.slug).replace(/-/g, ' '), l.name ? clean(l.name) : '']
     for (const k of keys) {
       const hit = starts(want, k) || starts(wantWords, k.replace(/-/g, ' '))
       if (hit && k.length > bestLen) { best = l; bestLen = k.length }

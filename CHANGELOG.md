@@ -25,6 +25,16 @@ Fixes from an outside review; each one has a regression test (`tests/audit-033.t
 - Hooks have timeouts (5 s for the lane guard, 10 s for the others). The `dreaming` skill runs only when called by name.
 - The status line printed `$&` in a lane name as a pattern, and its settings line in the README broke on a home folder with a space. Use the new line from the README.
 
+A second review of these fixes found problems in them, also fixed and tested:
+
+- `cd <subfolder> && git add -A && git commit` slipped past the second reader (`-A` and `-u` stage the whole repository from any folder), and so did `git commit -am <msg>` when the message looked like a path. One bad pathspec no longer skips the whole check.
+- A trailer after the commit (`git commit -m x && echo "Second-Reader: y"`) or in a later commit counted. Now only the commit's own text and its heredoc or `-F` file count.
+- Some option patterns could match two ways, so a long run of `--repo=x` or `--git-dir=x` took seconds to check (over the hook timeout). Each option now matches one way: 5,000 options take about 1 ms.
+- Two waiters could both take over a stale lock; a lock is now renamed away (only one rename wins) and released only by its owner.
+- A session that opens with a system note before the typed brief, a lane name with punctuation, and a slug with a dot now work.
+- New: `tests/oracle.test.mjs` runs about 1,000 generated push and commit commands for real and checks each verdict against what git did (0 misses), in CI as its own job.
+- README: what the guards are and are not (guard rails for an honest agent, not a security boundary).
+
 **After updating:** if you use the status line, replace your `statusLine` command with the one in the README.
 
 ## 0.3.2 (2026-11-12)

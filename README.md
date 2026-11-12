@@ -108,6 +108,8 @@ It reads the plugin cache under `~/.claude/plugins`; if you set `CLAUDE_CODE_PLU
 | `main-push-guard.mjs` | PreToolUse (Bash) | An agent's push that writes to the protected branch | Stop a push you type in a terminal. Use server-side protection for that. |
 | `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (Claude desktop app only) | Anything outside the desktop app. The real fix is the session's own switch: see "Lanes are never archived". |
 
+**What the guards are, and are not.** They are guard rails for an honest agent's ordinary commands, not a security boundary. A command written to get around them gets around them: `bash -c "git push origin main"`, a script file, a git alias. Every PreToolUse guard that reads command text has this limit. For a hard rule, use server-side protection (GitHub branch protection, required reviews).
+
 Every hook fails open: an error of its own, or a value of the wrong type in `brain.json`, lets the action through. Each hook also has a timeout (5 s for the lane guard, 10 s for the others), so a hung `git` call cannot stall your session. A guard that breaks your work is worse than no guard.
 
 ## Prior art
@@ -118,9 +120,10 @@ These ideas are not new on their own. Anthropic's [long-running agent harness](h
 
 ```
 node --test tests/*.test.mjs
+LANES_ORACLE=1 node --test tests/oracle.test.mjs
 ```
 
-No dependencies. Each hook runs in a temporary git repository with a made-up project config.
+No dependencies. Each hook runs in a temporary git repository with a made-up project config. The second line lets **git be the judge**: about 1,000 generated push and commit commands run for real against scratch repositories, and each guard must have stopped exactly the ones that moved the protected branch or committed a covered file. It takes a few minutes and runs in CI as its own job.
 
 ## License
 
