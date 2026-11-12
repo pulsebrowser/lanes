@@ -45,8 +45,16 @@ describe('lane PR guard', () => {
     expect(run('gh pr create', LANE, 'Read').status).toBe(0)
   })
 
-  it('lets one PR through with the unbind comment', () => {
+  it('lets a PR through with the ok comment, and the 0.1 unbind comment', () => {
+    expect(run('gh pr create --base main --fill # lane-pr: ok').status).toBe(0)
     expect(run('gh pr create --base main --fill # lane-pr: unbind').status).toBe(0)
+    expect(run('gh pr create --base main --fill # lane-pr: okay').status).toBe(2)
+  })
+
+  it('names the switch, not unbinding, as the fix', () => {
+    const r = run('gh pr create --base main --fill')
+    expect(r.stderr).toContain('auto_archive_on_close')
+    expect(r.stderr).toContain('does NOT change')
   })
 
   it('fails open on bad input or a missing registry', () => {
