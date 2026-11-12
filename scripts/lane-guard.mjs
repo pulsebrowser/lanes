@@ -15,6 +15,9 @@
  *   lane: <name>  this IS that lane's session (after a /clear). The hook passes and tells the model to read
  *                 the lane's state file first, then to trim it (the trim on clear, 0.3.0): delete finished work
  *                 and old Done items, move rules that outlive the work out, and rewrite the file, never append.
+ *                 In the desktop app it also CLAIMS the lane (0.3.2): lanes.json gets this session's id, so a
+ *                 replaced or restored session never leaves a stale id behind, and it tells the model to turn off
+ *                 this session's auto_archive_on_close switch (a lane is never archived).
  *
  * Exempt: scheduled task runs (their prompt is the task's SKILL.md body). It matches keywords in code, no model
  * call. It fails OPEN: any error of its own lets the message through.
@@ -22,7 +25,7 @@
  * Input: hook JSON on stdin ({ prompt, transcript_path, session_id }). Exit 2 blocks; stderr is shown to the user.
  * Env (tests): LANE_REGISTRY (path of lanes.json), LANE_TASKS_DIR (scheduled tasks folder).
  */
-import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync, writeFileSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import { loadBrainConfig, escapeRegExp as escape } from './brain-config.mjs'
 import { inspectStateFile } from './state-file.mjs'
@@ -71,6 +74,21 @@ function score(prompt, lane) {
 }
 
 /**
+ * The claim: `lane: <slug>` in the desktop app makes THIS session the lane's session in lanes.json. Before 0.3.2 the
+ * id was copied by hand and went stale when a session was replaced (the guard then pointed at an archived session).
+ * Written to a temporary file and renamed, so a reader never sees half a file. Returns the old id, or null.
+ */
+function claimLane(registry, data, lane, me) {
+  if (!me || lane.sessionId === me) return null
+  const old = lane.sessionId || 'none'
+  lane.sessionId = me
+  const tmp = `${registry}.${process.pid}.tmp`
+  writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n')
+  renameSync(tmp, registry)
+  return old
+}
+
+/**
  * The trim on clear: what to cut from the state file before new work. A clear is the cheap moment to prune,
  * since the model reads the whole file anyway. The checks are code (state-file.mjs); the cutting is the model's.
  */
@@ -102,7 +120,8 @@ function main() {
   try { input = JSON.parse(readFileSync(0, 'utf8')) } catch { return 0 }
   const prompt = String(input?.prompt ?? '')
   if (!prompt.trim() || !existsSync(REGISTRY)) return 0
-  const { lanes = [] } = JSON.parse(readFileSync(REGISTRY, 'utf8'))
+  const data = JSON.parse(readFileSync(REGISTRY, 'utf8'))
+  const { lanes = [] } = data
   const dir = path.dirname(REGISTRY)
 
   const lead = prompt.trimStart()
@@ -113,11 +132,19 @@ function main() {
     const lane = lanes.find((l) => want.startsWith(norm(l.slug)) || want.startsWith(norm(l.name)))
     if (lane) {
       const file = path.join(dir, `${lane.slug}.md`)
+      const me = process.env.CLAUDE_CODE_HOST_SESSION_ID
+      let claimed = null
+      try { claimed = claimLane(REGISTRY, data, lane, me) } catch { claimed = null }
       // Exit 0 with stdout: the text is added to the model's context.
       process.stdout.write(
         `This session is the "${lane.name}" lane. Before anything else, read its state file ${file}, ` +
           'then CLAUDE.md rules that apply. Keep that file current at the end of each piece of work.\n' +
           trimNote(file) +
+          (claimed ? `lanes.json now names this session (${me}) as the ${lane.name} lane; it named ${claimed} before.\n` : '') +
+          (me
+            ? 'A lane session is never archived: call mcp__ccd_pr__get_status (self); if monitor.auto_archive_on_close ' +
+              'is true, set it false with mcp__ccd_pr__set_monitor {"auto_archive_on_close": false}. Unbinding a PR does not change it.\n'
+            : '') +
           // 2026-11-10: a hook cannot set the title on UserPromptSubmit (only SessionStart has
           // sessionTitle, and it fires before this message names the lane), so the model does it.
           `If this session's title is not "${lane.title || lane.name}", rename it to that with ` +
