@@ -24,6 +24,10 @@ In Claude Code:
 
 Then ask Claude to set up lanes in your project (the `lanes:lanes` skill walks through it), or copy the files in [`templates/`](templates/) yourself.
 
+In the Claude desktop app, each lane session then turns off its own archive switch once (see "Lanes are never archived").
+
+**Updating:** `/plugin marketplace update lanes`, then `/plugin update lanes@lanes`, then restart your sessions (hooks load when a session starts). What changed, and what to do after each version: [CHANGELOG.md](CHANGELOG.md).
+
 To work on the plugin itself, clone it and run `claude --plugin-dir ./lanes`.
 
 ## Configure
@@ -36,6 +40,7 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
   "protectedBranch": "main",
   "lanesDir": "~/.claude/lanes/my-project",
   "scheduledTasksDir": "~/.claude/scheduled-tasks",
+  "stateFile": { "maxChars": 12000, "maxBulletChars": 300, "doneDays": 7 },
   "secondReader": {
     "coveredFiles": ".claude/covered-files.json",
     "verifyCommand": null,
@@ -50,10 +55,13 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 | `protectedBranch` | The branch agents never push to directly. | `main` |
 | `lanesDir` | Holds `lanes.json` and one `<slug>.md` per lane. Keep it outside git: session ids are local to one machine. | `~/.claude/lanes/<project folder>` |
 | `scheduledTasksDir` | Scheduled task runs pass the lane guard. | `~/.claude/scheduled-tasks` |
+| `stateFile.maxChars` | A state file over this many characters is flagged at each `lane: <slug>` and in the status line. | `12000` |
+| `stateFile.maxBulletChars` | Bullets longer than this are counted in the trim note. | `300` |
+| `stateFile.doneDays` | "Done" items older than this many days are named for deletion. | `7` |
 | `secondReader.coveredFiles` | A JSON map of area to paths (a path ending in `/` covers a folder). No file, no gate. | `.claude/covered-files.json` |
 | `secondReader.verifyCommand` | Optional check that must pass before the read (a model checker, a test target). | none |
 
-`lanes.json` lists your lanes. Each has a `slug`, a `name`, a `title`, a `sessionId` (`null` until the lane has a session) and `keywords` that only that lane's work uses. See [`templates/lanes.json`](templates/lanes.json).
+`lanes.json` lists your lanes. Each has a `slug`, a `name`, a `title`, a `sessionId` and `keywords` that only that lane's work uses. Leave `sessionId` `null`: in the desktop app, `lane: <slug>` writes the session's id there itself (0.3.2). In the terminal, set it by hand if you want the lane guard to name the session. See [`templates/lanes.json`](templates/lanes.json).
 
 ## Lanes are never archived
 
