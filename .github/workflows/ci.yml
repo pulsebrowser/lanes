@@ -16,6 +16,19 @@ jobs:
       - run: git config --global user.email ci@example.com && git config --global user.name ci && git config --global init.defaultBranch main
       - run: node --check scripts/*.mjs
       - run: node --test tests/*.test.mjs
+  oracle:
+    # Git is the judge: ~1,000 generated push and commit commands RUN against scratch repositories, and each guard's
+    # verdict must match what git did (tests/oracle.test.mjs). One Node version; it takes a few minutes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: git config --global user.email ci@example.com && git config --global user.name ci && git config --global init.defaultBranch main
+      - run: node --test tests/oracle.test.mjs
+        env:
+          LANES_ORACLE: '1'
   manifests:
     runs-on: ubuntu-latest
     steps:
@@ -37,5 +50,11 @@ jobs:
             exit(bad.zero? ? 0 : 1)'
       - name: JSON files parse
         run: for f in $(git ls-files '*.json'); do node -e 'JSON.parse(require("fs").readFileSync(process.argv[1]))' "$f" || exit 1; echo "ok $f"; done
+      - name: The plugin version has a CHANGELOG entry
+        run: |
+          v=$(node -p 'require("./.claude-plugin/plugin.json").version')
+          top=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md | cut -c4-)
+          echo "plugin.json $v, CHANGELOG $top"
+          test "$v" = "$top"
       - name: Hook commands point to scripts that exist
         run: grep -o 'scripts/[a-z-]*\.mjs' hooks/hooks.json | while read p; do test -f "$p" || { echo "MISSING $p"; exit 1; }; echo "ok $p"; done

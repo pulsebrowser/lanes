@@ -1,6 +1,7 @@
 ---
 name: dreaming
 description: A monthly consolidation pass over the project's memory, docs, lanes and scheduled watches - check notes against the code, merge duplicates, flag rules that no longer carry load, list stale docs and lanes. Reports and edits notes; never commits. Use when the user asks for a dreaming pass, a memory cleanup, or sets it up as a monthly scheduled task.
+disable-model-invocation: true
 ---
 
 # Dreaming pass

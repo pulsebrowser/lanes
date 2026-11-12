@@ -3,7 +3,11 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/lane-guard.mjs\"" }
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/lane-guard.mjs\"",
+            "timeout": 5
+          }
         ]
       }
     ],
@@ -11,9 +15,21 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/second-reader-guard.mjs\"" },
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/main-push-guard.mjs\"" },
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/lane-pr-guard.mjs\"" }
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/second-reader-guard.mjs\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/main-push-guard.mjs\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/lane-pr-guard.mjs\"",
+            "timeout": 10
+          }
         ]
       }
     ]

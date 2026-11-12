@@ -27,7 +27,9 @@ import { loadBrainConfig } from './brain-config.mjs'
 
 // the lane registry: `lanesDir` of .claude/brain.json (brain-config.mjs)
 const REGISTRY = process.env.LANE_REGISTRY || path.join(loadBrainConfig().lanesDir, 'lanes.json')
-const PR_CREATE = /(?:^|[\s;&|(])gh\s+pr\s+(?:create|new)\b/
+// `gh`, `/opt/homebrew/bin/gh`, with global options before `pr` (`gh -R owner/repo pr create`, `gh --repo=x pr new`).
+// The option branches never match the same text, so a long run of options cannot backtrack exponentially.
+const PR_CREATE = /(?:^|[\s;&|(])(?:[^\s;&|()]*\/)?gh(?:\s+(?:-R|--repo)(?:=|\s+)\S+|\s+(?!(?:-R|--repo)(?:=|\s|$))--?[a-zA-Z][\w-]*(?:=\S+)?)*\s+pr\s+(?:create|new)\b/
 const OVERRIDE = /#\s*lane-pr:\s*(?:ok|unbind)\b/i
 
 function main() {

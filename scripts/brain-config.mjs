@@ -33,34 +33,60 @@ const DEFAULTS = {
   },
 }
 
-const home = (p) => (p === '~' ? os.homedir() : p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p)
+/** `~` or `~/...` (or `~\\...` on Windows) made absolute. */
+const home = (p) => (p === '~' ? os.homedir() : /^~[\\/]/.test(p) ? path.join(os.homedir(), p.slice(2)) : p)
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+const str = (v, fallback) => (typeof v === 'string' && v.trim() ? v : fallback)
 
 /** The project folder: CLAUDE_PROJECT_DIR (Claude Code sets it for hooks), else the current folder. */
 export function projectDir() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd()
 }
 
-/** The merged config, with folder paths made absolute. Never throws. */
+/**
+ * The merged config, with folder paths made absolute. Never throws: a missing or broken file, or a key of the
+ * wrong type (`"lanesDir": null`, `"owner": 3`), gives that key's default. The hooks call it at load time, outside
+ * their own try, so a throw here would turn every hook into an error on every call.
+ */
 export function loadBrainConfig() {
   const root = projectDir()
   let file = {}
   try {
     const p = process.env.BRAIN_CONFIG || path.join(root, '.claude', 'brain.json')
-    if (existsSync(p)) file = JSON.parse(readFileSync(p, 'utf8')) || {}
+    if (existsSync(p)) file = JSON.parse(readFileSync(p, 'utf8'))
   } catch {
     file = {}
   }
+  if (!isObject(file)) file = {}
+  const stateFile = isObject(file.stateFile) ? file.stateFile : {}
+  const secondReader = isObject(file.secondReader) ? file.secondReader : {}
   const cfg = {
-    ...DEFAULTS,
-    ...file,
-    stateFile: { ...DEFAULTS.stateFile, ...(file.stateFile || {}) },
-    secondReader: { ...DEFAULTS.secondReader, ...(file.secondReader || {}) },
+    owner: str(file.owner, DEFAULTS.owner),
+    protectedBranch: str(file.protectedBranch, DEFAULTS.protectedBranch),
+    stateFile: { ...DEFAULTS.stateFile, ...stateFile },
+    secondReader: {
+      coveredFiles: str(secondReader.coveredFiles, DEFAULTS.secondReader.coveredFiles),
+      verifyCommand: str(secondReader.verifyCommand, DEFAULTS.secondReader.verifyCommand),
+      skill: str(secondReader.skill, DEFAULTS.secondReader.skill),
+    },
   }
-  cfg.lanesDir = path.resolve(home(cfg.lanesDir || path.join('~', '.claude', 'lanes', path.basename(root))))
-  cfg.scheduledTasksDir = path.resolve(home(cfg.scheduledTasksDir))
+  cfg.lanesDir = path.resolve(home(str(file.lanesDir, path.join('~', '.claude', 'lanes', path.basename(root)))))
+  cfg.scheduledTasksDir = path.resolve(home(str(file.scheduledTasksDir, DEFAULTS.scheduledTasksDir)))
   cfg.projectDir = root
   return cfg
 }
+
+/** A lane slug that is safe to use in a file name: letters, digits, `_`, `-` and `.`, never `..`, no path parts. */
+export const isSafeSlug = (s) => typeof s === 'string' && /^[a-z0-9][\w.-]*$/i.test(s) && !s.includes('..')
+
+/**
+ * The start of a `git` command, for the Bash guards: `git`, `/usr/bin/git`, with any global options
+ * (`-C <dir>`, `-c k=v`, `--git-dir=.git`, `--no-pager`) before the subcommand. Group 1 holds the options.
+ * The two option branches never match the same text (the second refuses the names the first takes), so a long run of
+ * options has ONE way to match: no exponential backtracking on a hostile command (0.3.3 second review).
+ */
+const TAKES_VALUE = String.raw`(?:-C|-c|--git-dir|--work-tree|--namespace)`
+export const GIT_PREFIX = String.raw`(?:^|[\s;&|(])(?:[^\s;&|()]*\/)?git((?:\s+${TAKES_VALUE}(?:=|\s+)(?:"[^"]+"|'[^']+'|\S+)|\s+(?!${TAKES_VALUE}(?:=|\s|$))--?[a-zA-Z][\w-]*(?:=\S+)?)*)\s+`
 
 /** A string as a literal inside a RegExp. */
 export const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
