@@ -15,9 +15,15 @@ import path from 'node:path'
 import { loadBrainConfig, isSafeSlug } from './brain-config.mjs'
 
 const NOW_LINES = 3
+// Every printed field on one line: a newline in a description or a state file cannot forge a lane block.
+const clean = (v) => String(v ?? '').replace(/\s+/g, ' ').trim()
 
 /** The first bullets of the "## Now" section of a state file. */
 function nowLines(file) {
+  try { return readNow(file) } catch { return [] } // a broken state file loses its own lines, never the table
+}
+
+function readNow(file) {
   if (!existsSync(file)) return []
   const out = []
   let inNow = false
@@ -25,7 +31,7 @@ function nowLines(file) {
     const head = /^##\s+(.+)$/.exec(row)
     if (head) { inNow = head[1].trim().toLowerCase().startsWith('now'); continue }
     if (inNow && /^\s*[-*]\s+\S/.test(row)) {
-      const text = row.trim().replace(/^[-*]\s+/, '')
+      const text = clean(row.replace(/^\s*[-*]\s+/, ''))
       out.push(text.length > 160 ? text.slice(0, 160) + '...' : text)
       if (out.length >= NOW_LINES) break
     }
@@ -40,21 +46,21 @@ function main() {
   const data = JSON.parse(readFileSync(registry, 'utf8'))
   const lanes = (Array.isArray(data?.lanes) ? data.lanes : []).filter((l) => isSafeSlug(l?.slug))
   const dir = path.dirname(registry)
-  const conductor = lanes.find((l) => l.role === 'conductor')
+  const conductor = lanes.find((l) => l.role === 'conductor' && l.sessionId) || lanes.find((l) => l.role === 'conductor')
   const work = lanes.filter((l) => l.role !== 'conductor')
 
   const lines = [`# Lanes (${work.length}), from ${registry}`, '']
   for (const l of work) {
-    lines.push(`## ${l.slug}: ${l.name || l.slug}`)
-    lines.push(`- does: ${l.description || '(no description: route by name and keywords, and ask when unsure)'}`)
-    lines.push(`- session: ${l.sessionId || 'no session yet (the owner must start it with "lane: ' + l.slug + '")'}`)
-    if (Array.isArray(l.keywords) && l.keywords.length) lines.push(`- keywords: ${l.keywords.slice(0, 15).join(', ')}`)
+    lines.push(`## ${l.slug}: ${clean(l.name) || l.slug}`)
+    lines.push(`- does: ${clean(l.description) || '(no description: route by name and keywords, and ask when unsure)'}`)
+    lines.push(`- session: ${clean(l.sessionId) || 'no session yet (the owner must start it with "lane: ' + l.slug + '")'}`)
+    if (Array.isArray(l.keywords) && l.keywords.length) lines.push(`- keywords: ${l.keywords.slice(0, 15).map(clean).join(', ')}`)
     const now = nowLines(path.join(dir, `${l.slug}.md`))
     if (now.length) lines.push(`- now: ${now.join(' | ')}`)
     lines.push('')
   }
   lines.push(conductor
-    ? `Conductor: ${conductor.name || conductor.slug}, session ${conductor.sessionId || 'not claimed yet'}.`
+    ? `Conductor: ${clean(conductor.name) || conductor.slug}, session ${clean(conductor.sessionId) || 'not claimed yet'}.`
     : 'No conductor lane in the registry (add one with "role": "conductor").')
   return lines.join('\n')
 }
