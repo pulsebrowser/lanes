@@ -11,6 +11,15 @@ claude plugin update lanes@lanes
 
 Then run `/reload-plugins` in each running session, or restart it: a session keeps the hooks it loaded until then. Read the "After updating" lines of each version you skipped.
 
+## 0.4.0 (2026-11-14)
+
+- **The conductor.** One lane (`"role": "conductor"`) that you talk or type to: it picks the lane for each request, asks one short question when unsure, forwards a full brief with `SendMessage` and relays the answer (skill `lanes:conductor`). Approvals stay in the lane, since a message from another session can never approve anything.
+- `scripts/conductor-lanes.mjs` prints the routing table: each lane's new `description`, its session and the first lines of its "Now" section.
+- The lane guard never stops the conductor's messages, never routes TO the conductor by keyword, points a stopped new session to the conductor, and tells `lane: conductor` to follow its skill.
+- `tests/conductor-eval.sh`: a routing eval in a real Claude session, run AS the conductor (not in CI). On 2026-11-14 with Haiku: 24/24, of which 8/8 held-out cases written after the skill was tuned (one of them seen once before a fix to the answer format). The first run was 13/16: the skill asked too readily and forced a general question into a lane; an ordered decision rule fixed both.
+
+**After updating:** add a one-sentence `description` to each lane in `lanes.json`. To use the conductor, add `{"slug": "conductor", "name": "Conductor", "title": "Conductor", "role": "conductor", "sessionId": null, "keywords": []}`, then open a new session and send `lane: conductor`; in the desktop app, turn its archive switch off like any lane.
+
 ## 0.3.3 (2026-11-12)
 
 Fixes from an outside review; each one has a regression test (`tests/audit-033.test.mjs`).

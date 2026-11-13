@@ -221,6 +221,9 @@ function main() {
             ? 'A lane session is never archived: call mcp__ccd_pr__get_status (self); if monitor.auto_archive_on_close ' +
               'is true, set it false with mcp__ccd_pr__set_monitor {"auto_archive_on_close": false}. Unbinding a PR does not change it.\n'
             : '') +
+          (lane.role === 'conductor'
+            ? 'This lane is the CONDUCTOR: follow the lanes:conductor skill. Route each request to a lane; do not do lane work here.\n'
+            : '') +
           // 2026-11-10: a hook cannot set the title on UserPromptSubmit (only SessionStart has
           // sessionTitle, and it fires before this message names the lane), so the model does it.
           `If this session's title is not "${lane.title || lane.name}", rename it to that with ` +
@@ -230,10 +233,16 @@ function main() {
     return 0
   }
 
+  // The conductor (0.4.0) takes every kind of request and routes it: its own messages are never stopped.
+  const conductor = lanes.find((l) => l?.role === 'conductor')
+  const me = process.env.CLAUDE_CODE_HOST_SESSION_ID
+  if (conductor?.sessionId && me && conductor.sessionId === me) return 0
+
   if (!isFirstPrompt(input.transcript_path, prompt)) return 0
   if (isScheduledTask(prompt)) return 0
 
   const ranked = lanes
+    .filter((l) => l?.role !== 'conductor')
     .map((l) => ({ lane: l, hits: score(prompt, l) }))
     .filter((r) => r.hits.length > 0)
     .sort((a, b) => b.hits.length - a.hits.length)
@@ -251,6 +260,7 @@ function main() {
       'Your message, to copy:',
       shown,
       '',
+      ...(conductor?.sessionId ? [`Or send it to the conductor ("${conductor.title || conductor.name}"), which routes it for you.`] : []),
       'To start a new session anyway, send it again with "new:" at the start.',
       `If this IS the ${lane.name} session after a clear, start with "lane: ${lane.slug}".`,
       '',

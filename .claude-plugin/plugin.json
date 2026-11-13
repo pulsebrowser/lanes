@@ -1,7 +1,7 @@
 {
   "name": "lanes",
   "displayName": "Lanes",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Run long-lived Claude Code sessions as lanes: one session and one state file per kind of work, a guard that turns duplicate sessions away, a second reader for risky commits, and a protected-branch push guard.",
   "author": { "name": "Pulse Browser", "url": "https://pulse-browser.com" },
   "homepage": "https://pulseos.finance/blog/one-person-six-lanes",
