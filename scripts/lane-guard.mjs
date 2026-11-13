@@ -93,7 +93,7 @@ function isScheduledTask(prompt) {
 
 function score(prompt, lane) {
   const p = norm(prompt)
-  return (lane.keywords || []).filter((k) => new RegExp(`(^|[^a-z0-9])${escape(norm(k))}($|[^a-z0-9])`).test(p))
+  return (Array.isArray(lane.keywords) ? lane.keywords : []).filter((k) => typeof k === 'string' && k.trim()).filter((k) => new RegExp(`(^|[^a-z0-9])${escape(norm(k))}($|[^a-z0-9])`).test(p))
 }
 
 /**
@@ -130,6 +130,8 @@ function claimLane(registry, slug, me) {
     if (!lane || lane.sessionId === me) return null
     const old = lane.sessionId || 'none'
     lane.sessionId = me
+    // One session is one lane: a session that claims this lane leaves any lane it held before (0.4.0 review).
+    for (const other of data.lanes || []) if (other !== lane && other?.sessionId === me) other.sessionId = null
     const tmp = `${registry}.${process.pid}.tmp`
     writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n')
     renameSync(tmp, registry)
@@ -221,6 +223,9 @@ function main() {
             ? 'A lane session is never archived: call mcp__ccd_pr__get_status (self); if monitor.auto_archive_on_close ' +
               'is true, set it false with mcp__ccd_pr__set_monitor {"auto_archive_on_close": false}. Unbinding a PR does not change it.\n'
             : '') +
+          (lane.role === 'conductor'
+            ? 'This lane is the CONDUCTOR: follow the lanes:conductor skill. Route each request to a lane; do not do lane work here.\n'
+            : '') +
           // 2026-11-10: a hook cannot set the title on UserPromptSubmit (only SessionStart has
           // sessionTitle, and it fires before this message names the lane), so the model does it.
           `If this session's title is not "${lane.title || lane.name}", rename it to that with ` +
@@ -230,10 +235,19 @@ function main() {
     return 0
   }
 
+  // The conductor (0.4.0) takes every kind of request and routes it: its own messages are never stopped.
+  const conductor = lanes.find((l) => l?.role === 'conductor' && l.sessionId) || lanes.find((l) => l?.role === 'conductor')
+  const me = process.env.CLAUDE_CODE_HOST_SESSION_ID
+  // A lane's OWN session (the conductor, or a work lane after a clear) is never stopped: the guard is for NEW
+  // sessions. And a message from another session (the conductor's brief) is not a typed first message.
+  if (me && lanes.some((l) => l?.sessionId && l.sessionId === me)) return 0
+  if (WRAPPERS.test(prompt.trimStart())) return 0
+
   if (!isFirstPrompt(input.transcript_path, prompt)) return 0
   if (isScheduledTask(prompt)) return 0
 
   const ranked = lanes
+    .filter((l) => l?.role !== 'conductor')
     .map((l) => ({ lane: l, hits: score(prompt, l) }))
     .filter((r) => r.hits.length > 0)
     .sort((a, b) => b.hits.length - a.hits.length)
@@ -251,6 +265,7 @@ function main() {
       'Your message, to copy:',
       shown,
       '',
+      ...(conductor?.sessionId ? [`Or send it to the conductor ("${conductor.title || conductor.name}"), which routes it for you.`] : []),
       'To start a new session anyway, send it again with "new:" at the start.',
       `If this IS the ${lane.name} session after a clear, start with "lane: ${lane.slug}".`,
       '',

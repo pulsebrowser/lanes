@@ -1,25 +1,54 @@
 {
   "lanes": [
     {
+      "slug": "conductor",
+      "name": "Conductor",
+      "title": "Conductor",
+      "role": "conductor",
+      "sessionId": null,
+      "description": "Takes every request, finds the lane for it, forwards a full brief and relays the answer. Does no lane work itself.",
+      "keywords": []
+    },
+    {
       "slug": "product",
       "name": "Product",
       "title": "Product",
       "sessionId": null,
-      "keywords": ["checkout", "onboarding", "dashboard", "billing"]
+      "description": "The app users pay for: checkout, onboarding, the dashboard and billing logic.",
+      "keywords": [
+        "checkout",
+        "onboarding",
+        "dashboard",
+        "billing"
+      ]
     },
     {
       "slug": "ops",
       "name": "Ops",
       "title": "Ops",
       "sessionId": null,
-      "keywords": ["deploy", "server", "nginx", "dns", "cron"]
+      "description": "Servers and delivery: deploys, nginx, DNS, cron jobs and the health of production.",
+      "keywords": [
+        "deploy",
+        "server",
+        "nginx",
+        "dns",
+        "cron"
+      ]
     },
     {
       "slug": "brain-ci",
       "name": "Brain and CI",
       "title": "Brain and CI",
       "sessionId": null,
-      "keywords": ["ci", "hook", "lint", "memory", "claude.md"]
+      "description": "How the work is run: CI, hooks, lint, the lanes setup, memory and CLAUDE.md.",
+      "keywords": [
+        "ci",
+        "hook",
+        "lint",
+        "memory",
+        "claude.md"
+      ]
     }
   ]
 }

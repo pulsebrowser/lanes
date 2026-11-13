@@ -65,6 +65,16 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 `lanes.json` lists your lanes. Each has a `slug`, a `name`, a `title`, a `sessionId` and `keywords` that only that lane's work uses. Leave `sessionId` `null`: in the desktop app, `lane: <slug>` writes the session's id there itself (0.3.2). In the terminal, set it by hand if you want the lane guard to name the session. See [`templates/lanes.json`](templates/lanes.json).
 
+## The conductor: talk to one session
+
+A conductor is one more lane, with `"role": "conductor"` in `lanes.json`. You type or talk to it; it finds the lane for each request, asks ONE short question when two lanes fit or none does, forwards a full brief to that lane's session with `SendMessage`, and relays the answer. Start it like any lane: a new session, first message `lane: conductor`.
+
+- **Code gives the facts, the model picks the lane.** `scripts/conductor-lanes.mjs` prints each lane's `description`, session and the first lines of its "Now" section. There is no separate classifier: with a handful of lanes, the conductor's own model reads the table and decides (Anthropic's [routing pattern](https://www.anthropic.com/engineering/building-effective-agents), simplest form).
+- **Approvals stay in the lane.** A message from another session can never approve anything in Claude Code, so a merge, a deploy or a permission prompt still needs you in that lane; the conductor tells you which one and links it.
+- **The keyword guard stays** as the fast, free backstop for new sessions; it never stops the conductor, and it points a stopped session to it.
+- **Cost:** two turns per request (the conductor's and the lane's).
+- **Routing eval:** `sh tests/conductor-eval.sh` runs a real Claude session in classify-only mode on requests with known lanes (Haiku by default, `LANES_EVAL_MODEL=opus` for more).
+
 ## Lanes are never archived
 
 The Claude desktop app can archive a session when a PR it touched merges or closes (its auto-archive setting, in Settings, under Claude Code). That suits a task session and kills a lane. The app copies the setting into each session as the switch `auto_archive_on_close`, and **only the session can turn its own copy off**: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`. Unbinding the PR does not change it.
