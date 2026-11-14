@@ -55,7 +55,7 @@ async function main() {
   const registry = process.env.LANE_REGISTRY || path.join(config.lanesDir, 'lanes.json')
   if (!existsSync(registry)) return ''
   const data = JSON.parse(readFileSync(registry, 'utf8'))
-  const lanes = (Array.isArray(data?.lanes) ? data.lanes : []).filter((l) => isSafeSlug(l?.slug))
+  const lanes = (Array.isArray(data?.lanes) ? data.lanes : []).filter((l) => isSafeSlug(l?.slug) && !l.retired)
 
   const ids = [process.env.CLAUDE_CODE_HOST_SESSION_ID, input?.session_id].filter(Boolean)
   let lane = lanes.find((l) => l?.sessionId && ids.includes(l.sessionId))

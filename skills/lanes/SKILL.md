@@ -41,6 +41,10 @@ The hook `lane-guard.mjs` reads the FIRST message of a new session. When the mes
 3. Rules that hold for every session go to CLAUDE.md or memory, not to the state file. The state file holds what is in progress.
 4. A lane session is never archived. In the desktop app, a session is archived when a PR it touched closes, unless its own `auto_archive_on_close` switch is off (setup step 6; every `lane: <slug>` reminds the model to check it). With the switch off, a lane may open PRs: add `# lane-pr: ok` to `gh pr create`. The hook `lane-pr-guard.mjs` stops `gh pr create` without that comment, as a backup for a lane whose switch is still on.
 
+## Retire a lane
+
+When the owner says a lane's kind of work is gone (not one finished task: that clears in place), retire it. Move the rules in its state file that outlive it to CLAUDE.md or the docs, then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/retire-lane.mjs" <slug>`. It marks the entry retired, clears its session id and moves the state file to `<lanesDir>/retired/`; it never archives a session. Tell the owner they may archive the lane's session in the app. `--undo` brings it back. The owner may archive any session at any time; lanes only keeps a pull request from doing it.
+
 ## When a task is not lane work
 
 A one-off task gets its own session, started with `new:`. It ends with a pull request, and the app archives it when the PR closes.

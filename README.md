@@ -26,7 +26,7 @@ In Claude Code:
 
 Then ask Claude to set up lanes in your project (the `lanes:lanes` skill walks through it), or copy the files in [`templates/`](templates/) yourself.
 
-In the Claude desktop app, each lane session then turns off its own archive switch once (see "Lanes are never archived").
+In the Claude desktop app, each lane session then turns off its own archive switch once (see "A pull request never archives a lane").
 
 **Updating:** `/plugin marketplace update lanes` in Claude Code, then `claude plugin update lanes@lanes` in a shell, then `/reload-plugins` in each running session (or restart it). What changed, and what to do after each version: [CHANGELOG.md](CHANGELOG.md).
 
@@ -65,6 +65,16 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 `lanes.json` lists your lanes. Each has a `slug`, a `name`, a `title`, a `sessionId` and `keywords` that only that lane's work uses. Leave `sessionId` `null`: in the desktop app, `lane: <slug>` writes the session's id there itself (0.3.2). In the terminal, set it by hand if you want the lane guard to name the session. See [`templates/lanes.json`](templates/lanes.json).
 
+## Retire a lane
+
+A finished TASK is not a reason to archive: the lane clears in place and takes the next task. A lane whose whole kind of work is gone is retired:
+
+1. Move the rules in its state file that outlive it to CLAUDE.md or the docs.
+2. Run `node <plugin>/scripts/retire-lane.mjs <slug>` (or ask Claude to). It marks the entry `"retired": "<date>"` in `lanes.json` and clears its session id (the entry stays, so the step can be undone), and moves the state file to `<lanesDir>/retired/`. From then on the lane guard never sends a new session to it, `lane: <slug>` does not claim it, the conductor never routes to it and the status line never names it.
+3. Archive its session in the app when you no longer need its history. The script never archives anything.
+
+Undo: `node <plugin>/scripts/retire-lane.mjs <slug> --undo`, then start its session again with `lane: <slug>`. Deleting the entry from `lanes.json` by hand also works, but loses its history.
+
 ## The conductor: talk to one session
 
 A conductor is one more lane, with `"role": "conductor"` in `lanes.json`. You type or talk to it; it finds the lane for each request, asks ONE short question when two lanes fit or none does, forwards a full brief to that lane's session with `SendMessage`, and relays the answer. Start it like any lane: a new session, first message `lane: conductor`.
@@ -75,9 +85,9 @@ A conductor is one more lane, with `"role": "conductor"` in `lanes.json`. You ty
 - **Cost:** two turns per request (the conductor's and the lane's).
 - **Routing eval:** `sh tests/conductor-eval.sh` runs a real Claude session in classify-only mode on requests with known lanes (Haiku by default, `LANES_EVAL_MODEL=opus` for more).
 
-## Lanes are never archived
+## A pull request never archives a lane
 
-The Claude desktop app can archive a session when a PR it touched merges or closes (its auto-archive setting, in Settings, under Claude Code). That suits a task session and kills a lane. The app copies the setting into each session as the switch `auto_archive_on_close`, and **only the session can turn its own copy off**: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`. Unbinding the PR does not change it.
+You can archive any session, a lane's included, whenever you want: no guard stops you. What lanes prevents is the app archiving a lane by itself. The Claude desktop app can archive a session when a PR it touched merges or closes (its auto-archive setting, in Settings, under Claude Code). That suits a task session and kills a lane. The app copies the setting into each session as the switch `auto_archive_on_close`, and **only the session can turn its own copy off**: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`. Unbinding the PR does not change it.
 
 Each `lane: <slug>` reminds the model to check the switch, and claims the lane in `lanes.json` for that session, so a replaced or restored session never leaves a stale id behind. Tested on 2026-11-12 on six lanes: switch off, a PR closed, every session still active.
 
@@ -116,7 +126,7 @@ It reads the plugin cache under `~/.claude/plugins`; if you set `CLAUDE_CODE_PLU
 | `lane-guard.mjs` | UserPromptSubmit | The first message of a new session that matches a lane with a session | Call a model. It matches keywords in code. A tie between two lanes passes. |
 | `second-reader-guard.mjs` | PreToolUse (Bash) | `git commit` of a covered file without a `Second-Reader:` line | Prove that the read happened. The line is the session's statement. |
 | `main-push-guard.mjs` | PreToolUse (Bash) | An agent's push that writes to the protected branch | Stop a push you type in a terminal. Use server-side protection for that. |
-| `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (Claude desktop app only) | Anything outside the desktop app. The real fix is the session's own switch: see "Lanes are never archived". |
+| `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (Claude desktop app only) | Anything outside the desktop app. The real fix is the session's own switch: see "A pull request never archives a lane". |
 
 **What the guards are, and are not.** They are guard rails for an honest agent's ordinary commands, not a security boundary. A command written to get around them gets around them: `bash -c "git push origin main"`, a script file, a git alias. Every PreToolUse guard that reads command text has this limit. For a hard rule, use server-side protection (GitHub branch protection, required reviews).
 

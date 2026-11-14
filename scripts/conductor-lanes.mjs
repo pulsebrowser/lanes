@@ -44,7 +44,7 @@ function main() {
   const registry = process.env.LANE_REGISTRY || path.join(config.lanesDir, 'lanes.json')
   if (!existsSync(registry)) return `No lanes registry at ${registry}. Set up lanes first (skill lanes:lanes).`
   const data = JSON.parse(readFileSync(registry, 'utf8'))
-  const lanes = (Array.isArray(data?.lanes) ? data.lanes : []).filter((l) => isSafeSlug(l?.slug))
+  const lanes = (Array.isArray(data?.lanes) ? data.lanes : []).filter((l) => isSafeSlug(l?.slug) && !l.retired)
   const dir = path.dirname(registry)
   const conductor = lanes.find((l) => l.role === 'conductor' && l.sessionId) || lanes.find((l) => l.role === 'conductor')
   const work = lanes.filter((l) => l.role !== 'conductor')
@@ -59,6 +59,8 @@ function main() {
     if (now.length) lines.push(`- now: ${now.join(' | ')}`)
     lines.push('')
   }
+  const retired = (Array.isArray(data?.lanes) ? data.lanes : []).filter((l) => l?.retired).map((l) => clean(l.name || l.slug))
+  if (retired.length) lines.push(`Retired (route nothing there): ${retired.join(', ')}.`, '')
   lines.push(conductor
     ? `Conductor: ${clean(conductor.name) || conductor.slug}, session ${clean(conductor.sessionId) || 'not claimed yet'}.`
     : 'No conductor lane in the registry (add one with "role": "conductor").')

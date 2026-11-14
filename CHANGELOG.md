@@ -11,6 +11,13 @@ claude plugin update lanes@lanes
 
 Then run `/reload-plugins` in each running session, or restart it: a session keeps the hooks it loaded until then. Read the "After updating" lines of each version you skipped.
 
+## 0.4.1 (2026-11-14)
+
+- **Retire a lane.** `scripts/retire-lane.mjs <slug>` marks the entry `"retired": "<date>"`, clears its session id and moves its state file to `<lanesDir>/retired/` (`--undo` brings it back). The lane guard, the conductor's routing table and the status line skip retired lanes, and `lane: <slug>` on a retired lane says so instead of claiming it. Before, a lane that was no longer needed kept matching new sessions to its (often archived) session, and the conductor kept routing to it.
+- The README heading "Lanes are never archived" read as "you cannot archive a lane". It is now "A pull request never archives a lane": you may archive any session at any time.
+
+**After updating:** nothing to do. To retire a lane, see the README, "Retire a lane".
+
 ## 0.4.0 (2026-11-14)
 
 - **The conductor.** One lane (`"role": "conductor"`) that you talk or type to: it picks the lane for each request, asks one short question when unsure, forwards a full brief with `SendMessage` and relays the answer (skill `lanes:conductor`). Approvals stay in the lane, since a message from another session can never approve anything.
