@@ -5,6 +5,8 @@
  *   node scripts/retire-lane.mjs <slug>            # retire
  *   node scripts/retire-lane.mjs <slug> --undo     # bring it back
  *
+ * Its inbox (`<slug>.inbox.json`, 0.5.0) moves with the state file; pending requests in it are named.
+ *
  * Retiring: lanes.json marks the entry `"retired": "<YYYY-MM-DD>"` and clears its `sessionId` (the entry stays, so the
  * history and the keywords are kept and the step can be undone), and the state file moves to `<lanesDir>/retired/`.
  * After that the lane guard never matches a new session to it, `lane: <slug>` does not claim it, the conductor
@@ -16,7 +18,9 @@
  *
  * Env: LANE_REGISTRY (tests: path of lanes.json), CLAUDE_PROJECT_DIR (the project).
  */
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, openSync, closeSync, unlinkSync, statSync } from 'node:fs'
+import { readFileSync, renameSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { withLock, writeWhole } from './lock.mjs'
+import { pendingItems, inboxPath } from './inbox-file.mjs'
 import path from 'node:path'
 import { loadBrainConfig, isSafeSlug } from './brain-config.mjs'
 
@@ -30,28 +34,7 @@ const registry = process.env.LANE_REGISTRY || path.join(loadBrainConfig().lanesD
 if (!existsSync(registry)) await fail(`No lanes registry at ${registry}.`)
 const dir = path.dirname(registry)
 
-/** The same lock as the lane guard's claim: one writer at a time, a lock older than 5 s is a dead process's. */
-function withLock(fn) {
-  const lock = `${registry}.lock`
-  const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-  const token = `${process.pid}-${Date.now()}-retire`
-  let fd = null
-  for (let i = 0; i < 200 && fd === null; i++) {
-    try { fd = openSync(lock, 'wx'); writeFileSync(fd, token) } catch {
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > 5000) { const gone = `${lock}.stale.${token}`; renameSync(lock, gone); unlinkSync(gone) }
-      } catch { /* another waiter got there first */ }
-      sleep(10)
-    }
-  }
-  if (fd === null) return { error: 'lanes.json is locked by another writer; try again.' }
-  try { return fn() } finally {
-    closeSync(fd)
-    try { if (readFileSync(lock, 'utf8') === token) unlinkSync(lock) } catch { /* ignore */ }
-  }
-}
-
-const result = withLock(() => {
+const locked = withLock(registry, () => {
   const data = JSON.parse(readFileSync(registry, 'utf8'))
   const lane = (data.lanes || []).find((l) => l?.slug === slug)
   // Refusals RETURN from inside the lock, so the finally below always releases it.
@@ -68,28 +51,37 @@ const result = withLock(() => {
     lane.retired = today
     lane.sessionId = null
   }
-  const tmp = `${registry}.${process.pid}.tmp`
-  writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n')
-  renameSync(tmp, registry)
+  writeWhole(registry, JSON.stringify(data, null, 2) + '\n')
   return { lane, session, today }
-})
+}, { tries: 200 })
+const result = locked.lockError ? { error: 'lanes.json is locked by another writer; try again.' } : locked
 if (result.error) await fail(result.error)
 
-// The state file: out of the lanes folder on retire, back on undo. Never overwrite.
-const live = path.join(dir, `${slug}.md`)
-const kept = path.join(dir, 'retired', `${slug}.md`)
-const [from, to] = undo ? [kept, live] : [live, kept]
-let moved = 'no state file to move'
-if (existsSync(from)) {
-  if (existsSync(to)) moved = `${to} already exists: left ${from} where it is`
-  else { mkdirSync(path.dirname(to), { recursive: true }); renameSync(from, to); moved = `state file moved to ${to}` }
+// The state file and the inbox (0.5.0): out of the lanes folder on retire, back on undo. Never overwrite.
+function move(file, what) {
+  const live = path.join(dir, file)
+  const kept = path.join(dir, 'retired', file)
+  const [from, to] = undo ? [kept, live] : [live, kept]
+  if (!existsSync(from)) return what === 'state file' ? 'no state file to move' : ''
+  if (existsSync(to)) return `${to} already exists: left ${from} where it is`
+  mkdirSync(path.dirname(to), { recursive: true })
+  renameSync(from, to)
+  return `${what} moved to ${to}`
 }
+// The inbox moves under ITS lock: an add that holds the lock (and already saw the lane not retired) finishes first,
+// and any add after it re-reads lanes.json under the same lock and refuses.
+const inboxMove = withLock(inboxPath(dir, slug), () => move(`${slug}.inbox.json`, 'inbox'), { tries: 200 })
+const moved = [move(`${slug}.md`, 'state file'), inboxMove.lockError ? `the inbox was locked: move ${slug}.inbox.json by hand` : inboxMove]
+  .filter(Boolean).join('; ')
+try { rmSync(path.join(dir, `${slug}.seen.json`), { force: true }) } catch { /* only a cache of notes shown */ }
+const pendingLeft = undo ? 0 : pendingItems(path.join(dir, 'retired', `${slug}.inbox.json`)).length
 
 const name = result.lane.name || slug
 process.stdout.write(undo
   ? `The "${name}" lane is back: ${moved}. Start its session with "lane: ${slug}" as the first message of a new session.\n`
   : [
       `The "${name}" lane is retired (${result.today}): ${moved}.`,
+      ...(pendingLeft ? [`Its inbox had ${pendingLeft} pending request(s): route them to another lane, or tell the owner.`] : []),
       result.session
         ? `Its session (${result.session}) is not archived by this script: archive it in the app when you no longer need its history.`
         : 'It had no session.',

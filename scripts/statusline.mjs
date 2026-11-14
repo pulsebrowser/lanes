@@ -12,7 +12,8 @@
  * It reads only the start of the transcript, and it fails quiet: on any error it prints nothing.
  *
  * Input: status line JSON on stdin ({ session_id, transcript_path, workspace: { project_dir }, cwd }).
- * When the lane's state file is over its cap (stateFile.maxChars, state-file.mjs), it adds ", state file 22k chars".
+ * When the lane's state file is over its cap (stateFile.maxChars, state-file.mjs), it adds ", state file 22k chars";
+ * when follow-ups are due, ", 1 due"; when its inbox has pending requests (0.5.0), ", inbox 2".
  * Env: LANE_REGISTRY (tests: path of lanes.json), LANES_STATUSLINE_FORMAT (default "lane: {name}"; also {slug}).
  */
 import { readFileSync, existsSync, openSync, readSync, closeSync } from 'node:fs'
@@ -51,6 +52,7 @@ async function main() {
   if (project && !process.env.CLAUDE_PROJECT_DIR) process.env.CLAUDE_PROJECT_DIR = project
   const { loadBrainConfig, isSafeSlug } = await import('./brain-config.mjs')
   const { inspectStateFile } = await import('./state-file.mjs')
+  const { inboxPath, pendingItems } = await import('./inbox-file.mjs')
   const config = loadBrainConfig()
   const registry = process.env.LANE_REGISTRY || path.join(config.lanesDir, 'lanes.json')
   if (!existsSync(registry)) return ''
@@ -70,7 +72,13 @@ async function main() {
   const line = format.replaceAll('{name}', () => String(lane.name || lane.slug)).replaceAll('{slug}', () => lane.slug)
   let info = null
   try { info = inspectStateFile(path.join(path.dirname(registry), `${lane.slug}.md`), config.stateFile) } catch { info = null }
-  return info?.overCap ? `${line}, state file ${Math.round(info.chars / 1000)}k chars` : line
+  const parts = [line]
+  if (info?.overCap) parts.push(`state file ${Math.round(info.chars / 1000)}k chars`)
+  if (info?.due?.length) parts.push(`${info.due.length} due`)
+  let pending = 0
+  try { pending = pendingItems(inboxPath(path.dirname(registry), lane.slug)).length } catch { pending = 0 }
+  if (pending) parts.push(`inbox ${pending}`)
+  return parts.join(', ')
 }
 
 main()

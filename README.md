@@ -70,7 +70,7 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 A finished TASK is not a reason to archive: the lane clears in place and takes the next task. A lane whose whole kind of work is gone is retired:
 
 1. Move the rules in its state file that outlive it to CLAUDE.md or the docs.
-2. Run `node <plugin>/scripts/retire-lane.mjs <slug>` (or ask Claude to). It marks the entry `"retired": "<date>"` in `lanes.json` and clears its session id (the entry stays, so the step can be undone), and moves the state file to `<lanesDir>/retired/`. From then on the lane guard never sends a new session to it, `lane: <slug>` does not claim it, the conductor never routes to it and the status line never names it.
+2. Run `node <plugin>/scripts/retire-lane.mjs <slug>` (or ask Claude to). It marks the entry `"retired": "<date>"` in `lanes.json` and clears its session id (the entry stays, so the step can be undone), and moves the state file and its inbox to `<lanesDir>/retired/` (it names any request still pending, to route elsewhere). From then on the lane guard never sends a new session to it, `lane: <slug>` does not claim it, the conductor never routes to it and the status line never names it.
 3. Archive its session in the app when you no longer need its history. The script never archives anything.
 
 Undo: `node <plugin>/scripts/retire-lane.mjs <slug> --undo`, then start its session again with `lane: <slug>`. Deleting the entry from `lanes.json` by hand also works, but loses its history.
@@ -82,7 +82,9 @@ A conductor is one more lane, with `"role": "conductor"` in `lanes.json`. You ty
 - **Code gives the facts, the model picks the lane.** `scripts/conductor-lanes.mjs` prints each lane's `description`, session and the first lines of its "Now" section. There is no separate classifier: with a handful of lanes, the conductor's own model reads the table and decides (Anthropic's [routing pattern](https://www.anthropic.com/engineering/building-effective-agents), simplest form).
 - **Approvals stay in the lane.** A message from another session can never approve anything in Claude Code, so a merge, a deploy or a permission prompt still needs you in that lane; the conductor tells you which one and links it.
 - **The keyword guard stays** as the fast, free backstop for new sessions; it never stops the conductor, and it points a stopped session to it.
-- **Cost:** two turns per request (the conductor's and the lane's).
+- **Nothing is lost (0.5.0).** Before it sends a brief, the conductor writes it to the lane's inbox (`<lanesDir>/<slug>.inbox.json`, `scripts/lane-inbox.mjs`). A brief sent to a session that was stopped, cleared or replaced, or a send that was held, stays there. In the desktop app the lane guard names it once, on the lane's next message (it knows the session by its id); in the terminal it names it at the next `lane: <slug>`. The status line keeps the count until the lane marks it done. A retried add is not a second request.
+- **What waits for you, in one place.** The routing table also lists each lane's "Waiting for <owner>" items (each approval a lane needs, with its link), its due follow-ups and its pending requests, with the totals at the top. Ask the conductor "what do you need from me?".
+- **Cost:** two turns per request (the conductor's and the lane's). The inbox, the waiting list and the follow-ups are code: no model call, and the lane guard adds a note to a lane's context only when something is new.
 - **Routing eval:** `sh tests/conductor-eval.sh` runs a real Claude session in classify-only mode on requests with known lanes (Haiku by default, `LANES_EVAL_MODEL=opus` for more).
 
 ## A pull request never archives a lane
@@ -99,6 +101,10 @@ A state file that only grows carries old decisions into work where they no longe
 
 - **A fixed shape, rewritten, with a cap.** Sections: Now, Waiting for the owner, Decisions to keep (dated, with the why), Done this week, Where things are ([`templates/lane-state.md`](templates/lane-state.md)). Each update rewrites the file; nothing is appended. One fact per bullet, under 300 characters. The cap is in characters, 12,000 (about 3,000 tokens), not lines: a line cap is dodged by merging bullets into one long line. The status line adds `, state file 22k chars` when the file is over the cap.
 - **A trim at every clear.** On `lane: <slug>`, the lane guard tells the model to trim the file before new work, and names the Done items older than 7 days, a file over the cap and the bullets over 300 characters. The model deletes finished work, checks each decision against the code, and moves rules that will outlive the work to CLAUDE.md or the docs.
+
+- **A link, not a copy.** A fact that git, a PR or the docs already hold is a link in the state file.
+
+**Follow-ups (0.5.0).** A bullet with `(due YYYY-MM-DD)` is a follow-up the lane set for itself ("check the reviewer's reply"). No scheduler wakes a lane, on purpose: each wake would cost a model turn. When the date comes (the owner's local date), the status line adds `, 1 due` and the conductor's table lists it; the lane guard names it once, on the lane's next message in the desktop app and at the next `lane: <slug>` everywhere.
 
 The limits are in `.claude/brain.json`: `"stateFile": { "maxChars": 12000, "maxBulletChars": 300, "doneDays": 7 }`. The monthly `dreaming` pass still does the deeper check.
 
@@ -117,13 +123,13 @@ A plugin cannot set the status line, and the plugin's folder changes with each v
 }
 ```
 
-It reads the plugin cache under `~/.claude/plugins`; if you set `CLAUDE_CODE_PLUGIN_CACHE_DIR`, change the path in the line. On Windows it needs `sh` (Git Bash). `LANES_STATUSLINE_FORMAT` changes the text (default `lane: {name}`; `{slug}` also works). If you already have a status line, call the script from yours and print both. The status line shows in the terminal; the desktop app does not document one.
+It also adds `, 1 due` when follow-ups are due and `, inbox 2` when the lane's inbox has pending requests. It reads the plugin cache under `~/.claude/plugins`; if you set `CLAUDE_CODE_PLUGIN_CACHE_DIR`, change the path in the line. On Windows it needs `sh` (Git Bash). `LANES_STATUSLINE_FORMAT` changes the text (default `lane: {name}`; `{slug}` also works). If you already have a status line, call the script from yours and print both. The status line shows in the terminal; the desktop app does not document one.
 
 ## What each hook does, and does not do
 
 | Hook | Event | Stops | Does not |
 |---|---|---|---|
-| `lane-guard.mjs` | UserPromptSubmit | The first message of a new session that matches a lane with a session | Call a model. It matches keywords in code. A tie between two lanes passes. |
+| `lane-guard.mjs` | UserPromptSubmit | The first message of a new session that matches a lane with a session. On a lane's own messages it stops nothing, and names new inbox requests and due follow-ups once | Call a model. It matches keywords in code. A tie between two lanes passes. |
 | `second-reader-guard.mjs` | PreToolUse (Bash) | `git commit` of a covered file without a `Second-Reader:` line | Prove that the read happened. The line is the session's statement. |
 | `main-push-guard.mjs` | PreToolUse (Bash) | An agent's push that writes to the protected branch | Stop a push you type in a terminal. Use server-side protection for that. |
 | `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (Claude desktop app only) | Anything outside the desktop app. The real fix is the session's own switch: see "A pull request never archives a lane". |
