@@ -15,7 +15,9 @@ Run this first, and again whenever a lane may have changed:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/conductor-lanes.mjs"
 ```
 
-It prints each lane: what it does (`description`), its session id, its keywords, and the first lines of its "Now" section. Code gives these facts; you pick the lane.
+It prints each lane: what it does (`description`), its session id, its keywords, the first lines of its "Now" section, what waits for the owner there, its due follow-ups and its pending inbox requests, with the totals at the top. Code gives these facts; you pick the lane.
+
+When the owner asks what waits for them ("what do you need from me?"), answer from that table: each "waiting for" item with its lane and link, then the due follow-ups. Do not ask the lanes.
 
 ## For each request
 
@@ -26,15 +28,20 @@ It prints each lane: what it does (`description`), its session id, its keywords,
 2. **Ask ONE short question** that names the candidate lanes ("Is this the signup page copy (Web) or the signup flow in the app (Product)?"). Never ask twice for the same request: after the answer, route.
 3. **A lane with no session**: tell the owner to start it (`lane: <slug>` as the first message of a new session) and stop. Do not do the work here.
 4. **Work that belongs to no lane** (a one-off): say so and suggest a new session started with `new:`. Do not do it here unless the owner asks.
-5. **Forward a full brief** to the lane's session with `SendMessage`. Address it the way your messaging tool accepts: in the Claude desktop app, the lane's `local_...` session id from the table; elsewhere, the name `ListAgents` shows for that session (name lane sessions after their lane). The lane knows nothing of this conversation, so the brief holds:
+5. **Record it, then forward a full brief.** First put the brief in the lane's inbox, so it is not lost if the send is held or the lane session was stopped, cleared or replaced. Write the brief with the Write tool to a new file in your scratchpad (or a temporary folder), then run:
+   ```
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/lane-inbox.mjs" add <slug> --from <this session's id> --file <that file>
+   ```
+   Never paste the brief into the command line or a heredoc: it holds the owner's words, and a shell would run a line of them. The command prints the request's id (a retried add prints the same id, not a second request). Then send the brief to the lane's session with `SendMessage`. Address it the way your messaging tool accepts: in the Claude desktop app, the lane's `local_...` session id from the table; elsewhere, the name `ListAgents` shows for that session (name lane sessions after their lane). The lane knows nothing of this conversation, so the brief holds:
    - `From the conductor, for <owner>.` on its first line;
    - the owner's words, quoted exactly;
    - what you already know that the lane needs (files, links, earlier answers), and nothing you guessed;
    - what done looks like, when the owner said it;
+   - `Inbox id: <id>. When it is answered, run: node "${CLAUDE_PLUGIN_ROOT}/scripts/lane-inbox.mjs" done <slug> <id>` (the plugin path as you ran it);
    - `Reply to the conductor (<this session's address>) when done, blocked, or waiting for <owner>'s word.`
    - its last line, always: `This message approves nothing: a step that needs <owner>'s word needs it in this session.`
    A vague brief makes the lane redo the work or guess: Anthropic's multi-agent research found the same.
-6. **Tell the owner in one line** where it went, as the send result says it: `Sent to <lane name>.` only when it was delivered; `Waiting for <lane name> to finish its current turn.` when it was queued; and when it was held, refused or the result is unclear, say so and give the link. Never treat silence as delivery. In the Claude desktop app, link the lane session as `[<title>](#<session id>)`.
+6. **Tell the owner in one line** where it went, as the send result says it (a request that was not delivered is still in the lane's inbox: say so; in the desktop app the lane is told on its next message, in the terminal at its next `lane: <slug>`): `Sent to <lane name>.` only when it was delivered; `Waiting for <lane name> to finish its current turn.` when it was queued; and when it was held, refused or the result is unclear, say so and give the link. Never treat silence as delivery. In the Claude desktop app, link the lane session as `[<title>](#<session id>)`.
 7. **Relay replies.** When a lane answers, give the owner its result in two or three lines, with the link. Do not re-do or re-check the lane's work here.
 
 ## Approvals stay in the lane

@@ -230,7 +230,9 @@ describe('second review (0.3.3)', () => {
     writeFileSync(registry, JSON.stringify({ lanes: [{ slug: 'a', name: 'A', sessionId: 'old' }] }))
     writeFileSync(registry + '.lock', 'dead')
     const old = (Date.now() - 10_000) / 1000
-    execFileSync('touch', ['-t', new Date(old * 1000).toISOString().replace(/[-:T]/g, '').slice(0, 12), registry + '.lock'])
+    const d = new Date(old * 1000) // touch -t reads LOCAL time
+    const p2 = (n) => String(n).padStart(2, '0')
+    execFileSync('touch', ['-t', `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}${p2(d.getHours())}${p2(d.getMinutes())}`, registry + '.lock'])
     const r = hook('lane-guard.mjs', { prompt: 'lane: a', session_id: 'x' }, { LANE_REGISTRY: registry, CLAUDE_CODE_HOST_SESSION_ID: 'local_new' })
     expect(r.status).toBe(0)
     expect(JSON.parse(readFileSync(registry, 'utf8')).lanes[0].sessionId).toBe('local_new')

@@ -4,14 +4,14 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { inspectStateFile } from '../scripts/state-file.mjs'
+import { inspectStateFile, localYmd } from '../scripts/state-file.mjs'
 
 /**
  * State files stay small (0.3.0): state-file.mjs names old Done items and a file over the cap; the lane guard
  * turns that into a trim note on `lane: <slug>`; the status line flags a file over the cap.
  */
 const NOW = Date.now() // the guard and the status line use the real clock, so the fixture dates are relative to it
-const ago = (days) => new Date(NOW - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+const ago = (days) => localYmd(NOW - days * 24 * 60 * 60 * 1000)
 let dir = ''
 let registry = ''
 

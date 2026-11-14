@@ -11,6 +11,20 @@ claude plugin update lanes@lanes
 
 Then run `/reload-plugins` in each running session, or restart it: a session keeps the hooks it loaded until then. Read the "After updating" lines of each version you skipped.
 
+## 0.5.0 (2026-11-14)
+
+Ideas from Anthropic's article [Building always-on agents](https://claude.com/resources/articles/building-always-on-agents) (an event inbox, timers the agent sets for itself, approvals as requests that wait, store only what cannot be looked up), kept to what one owner on one machine needs. No scheduler and no runs nobody watches: every part is code, with no model call.
+
+- **A lane inbox.** `scripts/lane-inbox.mjs add|list|done`. The conductor writes each brief to `<lanesDir>/<slug>.inbox.json` BEFORE it sends it. Before, a brief lived only in the message: a send that was held, or one to a session that was stopped, cleared or replaced, was lost. The lane guard names new requests once (`<slug>.seen.json` holds what was shown): on the lane's next message in the desktop app, at the next `lane: <slug>` in the terminal; the lane marks each one done, and the same request added twice (a retry) is kept once. Writes hold a lock, re-check under it that the lane is not retired (retiring moves the inbox under the same lock), and never replace a file they could not read; done items are dropped after `stateFile.doneDays`. The conductor writes the brief to a file first and passes `--file`: a brief pasted into a heredoc could end it and run a line as a command.
+- **What waits for the owner, in one place.** The conductor's table lists each lane's "Waiting for <owner>" bullets, its due follow-ups and its pending requests, with totals at the top. A lane writes each approval it needs there with its link.
+- **Follow-ups.** `(due YYYY-MM-DD)` in a state-file bullet. When the date comes, the status line adds `, 1 due` (and `, inbox 2` for pending requests), the table lists it, and the lane guard names it once, as for the inbox.
+- **A link, not a copy:** the template and the trim note say that a fact git, a PR or the docs already hold is a link in the state file.
+- Retiring a lane moves its inbox with its state file and names the requests still pending. The lock code of the claim and of retire-lane is now one module, `scripts/lock.mjs`.
+
+Not taken from the article, on purpose: a scheduler that wakes lanes (each wake costs a model turn), and splitting the state file into an index plus files read on demand (not worth it under the 12,000-character cap).
+
+**After updating:** nothing to do. After `/reload-plugins`, the conductor adds each brief to the lane's inbox first, and in the desktop app a lane is told about it on its next message. To set a follow-up, add `(due YYYY-MM-DD)` to a bullet.
+
 ## 0.4.1 (2026-11-14)
 
 - **Retire a lane.** `scripts/retire-lane.mjs <slug>` marks the entry `"retired": "<date>"`, clears its session id and moves its state file to `<lanesDir>/retired/` (`--undo` brings it back). The lane guard, the conductor's routing table and the status line skip retired lanes, and `lane: <slug>` on a retired lane says so instead of claiming it. Before, a lane that was no longer needed kept matching new sessions to its (often archived) session, and the conductor kept routing to it.
