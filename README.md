@@ -14,11 +14,11 @@ What the plugin provides:
 - **A push guard.** A hook that stops an agent's push to your protected branch, so changes go through a pull request and CI. Useful where GitHub branch protection is not available.
 - **A dreaming pass.** A skill you run by name that checks your notes against the code, merges duplicates and lists rules that no longer apply.
 
-The hooks are guard rails for an agent that follows the rules, not a security boundary: see "What each hook does, and does not do". The plugin was made for one project and is shared as it is. How it is used there: [One person, six lanes](https://pulseos.finance/blog/one-person-six-lanes).
+The hooks are guard rails for an agent that follows the rules, not a security boundary: see "Hooks". The plugin was made for one project and is shared as it is. How it is used there: [One person, six lanes](https://pulseos.finance/blog/one-person-six-lanes).
 
 ## Install
 
-Requires Node.js 20 or later on your `PATH`: the hooks are Node scripts. Without Node they cannot run, and the guards do nothing.
+The hooks are Node.js scripts, so Node.js 20 or later must be on your `PATH`. Without Node.js the hooks cannot run, and nothing is guarded.
 
 In Claude Code:
 
@@ -27,15 +27,23 @@ In Claude Code:
 /plugin install lanes@lanes
 ```
 
-Then ask Claude to set up lanes in your project (the `lanes:lanes` skill walks through it), or copy the files in [`templates/`](templates/) yourself.
+Then ask Claude to set up lanes in your project (the `lanes:lanes` skill does the steps), or copy the files in [`templates/`](templates/) yourself.
 
-In the Claude desktop app, each lane session then turns off its own archive switch once (see "A pull request never archives a lane").
+In the Claude desktop app, each lane session must also turn off its own archive switch once. See "Archive switch (desktop app)".
 
-**Updating:** `/plugin marketplace update lanes` in Claude Code, then `claude plugin update lanes@lanes` in a shell, then `/reload-plugins` in each running session (or restart it). What changed, and what to do after each version: [CHANGELOG.md](CHANGELOG.md).
+## Update
+
+1. In Claude Code: `/plugin marketplace update lanes`.
+2. In a shell: `claude plugin update lanes@lanes`.
+3. In each running session: `/reload-plugins`, or restart the session. A session keeps the hooks it loaded until then.
+
+[CHANGELOG.md](CHANGELOG.md) lists what changed in each version, and what to do after updating.
 
 To work on the plugin itself, clone it and run `claude --plugin-dir ./lanes`.
 
 ## Configure
+
+### `.claude/brain.json`
 
 The hooks read one file in your project, `.claude/brain.json`. Every key is optional.
 
@@ -56,66 +64,80 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 | Key | What it does | Default |
 |---|---|---|
-| `owner` | Whose word allows an exception. Appears in messages and in the override comment `# main-push: <owner>'s word`. | `the owner` |
-| `protectedBranch` | The branch agents never push to directly. | `main` |
-| `lanesDir` | Holds `lanes.json` and one `<slug>.md` per lane. Keep it outside git: session ids are local to one machine. | `~/.claude/lanes/<project folder>` |
+| `owner` | The person whose word allows an exception. Used in messages and in the override comment `# main-push: <owner>'s word`. | `the owner` |
+| `protectedBranch` | The branch that agents must not push to directly. | `main` |
+| `lanesDir` | The folder for `lanes.json`, the state files and the inboxes. Keep it outside git: session ids are local to one machine. | `~/.claude/lanes/<project folder>` |
 | `scheduledTasksDir` | Scheduled task runs pass the lane guard. | `~/.claude/scheduled-tasks` |
-| `stateFile.maxChars` | A state file over this many characters is flagged at each `lane: <slug>` and in the status line. | `12000` |
-| `stateFile.maxBulletChars` | Bullets longer than this are counted in the trim note. | `300` |
-| `stateFile.doneDays` | "Done" items older than this many days are named for deletion. | `7` |
-| `secondReader.coveredFiles` | A JSON map of area to paths (a path ending in `/` covers a folder). No file, no gate. | `.claude/covered-files.json` |
-| `secondReader.verifyCommand` | Optional check that must pass before the read (a model checker, a test target). | none |
+| `stateFile.maxChars` | The cap on a state file, in characters. | `12000` |
+| `stateFile.maxBulletChars` | The cap on one bullet, in characters. | `300` |
+| `stateFile.doneDays` | "Done" items older than this many days are named for deletion. Done inbox requests are dropped after the same number of days. | `7` |
+| `secondReader.coveredFiles` | A JSON map of area to paths (a path that ends in `/` covers a folder). With no file, the second reader checks nothing. | `.claude/covered-files.json` |
+| `secondReader.verifyCommand` | An optional check that must pass before the read (a model checker, a test target). | none |
 
-`lanes.json` lists your lanes. Each has a `slug`, a `name`, a `title`, a `sessionId` and `keywords` that only that lane's work uses. Leave `sessionId` `null`: in the desktop app, `lane: <slug>` writes the session's id there itself (0.3.2). In the terminal, set it by hand if you want the lane guard to name the session. See [`templates/lanes.json`](templates/lanes.json).
+### `lanes.json`
+
+`lanes.json`, in `lanesDir`, lists the lanes. See [`templates/lanes.json`](templates/lanes.json).
+
+| Field | What it does |
+|---|---|
+| `slug` | The lane's id. Also the name of its state file, `<slug>.md`. Letters, digits, `.`, `_` and `-`. |
+| `name` | The name in messages and in the status line. |
+| `title` | The session title. The lane session sets it on `lane: <slug>`. |
+| `description` | One sentence on what the lane does. The conductor routes by it. |
+| `keywords` | Words that only this lane's work uses. The lane guard matches them. |
+| `sessionId` | The lane's session. Leave it `null`: in the desktop app, `lane: <slug>` writes it. In the terminal, set it by hand if you want the lane guard to name the session. |
+| `role` | `"conductor"` for the conductor lane. Leave it out for a work lane. |
+| `retired` | The date the lane was retired. Set by `retire-lane.mjs`. |
+
+## How a lane works
+
+- **Start or resume.** The first message of a lane session is `lane: <slug>`. The lane guard then tells the model to read the state file first, and in the desktop app it writes the session's id into `lanes.json`. When the context gets long, the session updates its state file, clears in place (`/clear`) and starts again with `lane: <slug>`.
+- **The state file.** It has fixed sections: Now, Waiting for the owner, Decisions to keep, Done this week, Where things are ([`templates/lane-state.md`](templates/lane-state.md)). Each update rewrites the file; nothing is appended. Each bullet holds one fact. A fact that git, a PR or the docs already hold is a link, not a copy.
+- **The cap.** The cap is in characters (12,000, about 3,000 tokens), not lines, because a cap in lines is easy to avoid by merging bullets into one long line. The status line adds `, state file 22k chars` when a file is over the cap.
+- **The trim at each clear.** On `lane: <slug>`, the lane guard tells the model to trim the file before new work. It names Done items older than 7 days, a file over the cap, and bullets over 300 characters. The model deletes finished work, checks each decision against the code, and moves rules that will outlive the work to CLAUDE.md or the docs.
+- **Waiting for the owner.** A step that needs the owner's word (a merge, a deploy, a choice) goes under "Waiting for <owner>" with its link, and is deleted when it is given. The conductor lists these items for all lanes.
+- **Follow-ups.** A bullet with `(due YYYY-MM-DD)` is a follow-up that the lane set for itself, for example "check the reviewer's reply". On that date (the owner's local date), the status line adds `, 1 due` and the conductor's table lists it. The lane guard names it once: on the lane's next message in the desktop app, and at the next `lane: <slug>` in the terminal. Nothing wakes a lane on a schedule, because each wake would cost a model turn.
+- **The dreaming pass.** The `dreaming` skill does a deeper check, for example once a month: it compares notes with the code, merges duplicates and lists stale docs and lanes. It runs only when you call it by name.
+
+## The conductor
+
+The conductor is one more lane, with `"role": "conductor"` in `lanes.json`. You type or talk to it. For each request it finds the lane, asks one short question when two lanes fit or none does, sends a full brief to that lane's session with `SendMessage`, and gives you the answer. To start it, open a new session with the first message `lane: conductor`.
+
+- **Routing.** `scripts/conductor-lanes.mjs` prints a table of the lanes: each lane's description, session, keywords and the first lines of its "Now" section. The conductor's model reads the table and picks the lane. There is no separate classifier; this is the simplest form of the [routing pattern](https://www.anthropic.com/engineering/building-effective-agents).
+- **The inbox.** Before it sends a brief, the conductor writes it to the lane's inbox, `<lanesDir>/<slug>.inbox.json` (`scripts/lane-inbox.mjs add|list|done`). If the send is held, or the lane session was stopped, cleared or replaced, the request stays in the inbox. The lane guard names new requests once (on the lane's next message in the desktop app, at the next `lane: <slug>` in the terminal), and the status line shows `, inbox 2` until the lane marks them done. The same request added twice is kept once.
+- **What waits for you.** The table also lists, for each lane, its "Waiting for <owner>" items, its due follow-ups and its pending requests, with totals at the top. Ask the conductor "what do you need from me?".
+- **Approvals.** In Claude Code, a message from another session cannot approve anything. A merge, a deploy or a permission prompt in a lane still needs you in that lane. The conductor tells you which lane, with a link.
+- **The lane guard.** It still checks new sessions by keyword. It never stops the conductor, and when it stops a new session it names the conductor as another way.
+- **Cost.** Each request takes two turns: the conductor's and the lane's. The inbox, the table and the follow-ups are code, with no model call. The lane guard adds a note to a lane's context only when something is new.
+- **Routing eval.** `sh tests/conductor-eval.sh` runs a real Claude session in classify-only mode on requests whose lane is known (Haiku by default; `LANES_EVAL_MODEL=opus` for a larger model).
 
 ## Retire a lane
 
-A finished TASK is not a reason to archive: the lane clears in place and takes the next task. A lane whose whole kind of work is gone is retired:
+A finished task is not a reason to retire a lane: the lane clears in place and takes the next task. Retire a lane when its whole kind of work is gone:
 
-1. Move the rules in its state file that outlive it to CLAUDE.md or the docs.
-2. Run `node <plugin>/scripts/retire-lane.mjs <slug>` (or ask Claude to). It marks the entry `"retired": "<date>"` in `lanes.json` and clears its session id (the entry stays, so the step can be undone), and moves the state file and its inbox to `<lanesDir>/retired/` (it names any request still pending, to route elsewhere). From then on the lane guard never sends a new session to it, `lane: <slug>` does not claim it, the conductor never routes to it and the status line never names it.
-3. Archive its session in the app when you no longer need its history. The script never archives anything.
+1. Move the rules in its state file that will outlive it to CLAUDE.md or the docs.
+2. Run `node <plugin>/scripts/retire-lane.mjs <slug>`, or ask Claude to. The script:
+   - sets `"retired": "<date>"` on the entry in `lanes.json` and clears its `sessionId` (the entry stays, so you can undo the step);
+   - moves the state file and the inbox to `<lanesDir>/retired/`, and names any request still pending, so you can send it to another lane.
 
-Undo: `node <plugin>/scripts/retire-lane.mjs <slug> --undo`, then start its session again with `lane: <slug>`. Deleting the entry from `lanes.json` by hand also works, but loses its history.
+   After that, the lane guard does not send new sessions to the lane, `lane: <slug>` does not claim it, the conductor does not route to it, and the status line does not name it.
+3. Archive the lane's session in the app when you no longer need its history. The script does not archive anything.
 
-## The conductor: talk to one session
+To undo: `node <plugin>/scripts/retire-lane.mjs <slug> --undo`, then start the session again with `lane: <slug>`. You can also delete the entry from `lanes.json` by hand, but then its history is lost.
 
-A conductor is one more lane, with `"role": "conductor"` in `lanes.json`. You type or talk to it; it finds the lane for each request, asks ONE short question when two lanes fit or none does, forwards a full brief to that lane's session with `SendMessage`, and relays the answer. Start it like any lane: a new session, first message `lane: conductor`.
+## Archive switch (desktop app)
 
-- **Code gives the facts, the model picks the lane.** `scripts/conductor-lanes.mjs` prints each lane's `description`, session and the first lines of its "Now" section. There is no separate classifier: with a handful of lanes, the conductor's own model reads the table and decides (Anthropic's [routing pattern](https://www.anthropic.com/engineering/building-effective-agents), simplest form).
-- **Approvals stay in the lane.** A message from another session can never approve anything in Claude Code, so a merge, a deploy or a permission prompt still needs you in that lane; the conductor tells you which one and links it.
-- **The keyword guard stays** as the fast, free backstop for new sessions; it never stops the conductor, and it points a stopped session to it.
-- **Nothing is lost (0.5.0).** Before it sends a brief, the conductor writes it to the lane's inbox (`<lanesDir>/<slug>.inbox.json`, `scripts/lane-inbox.mjs`). A brief sent to a session that was stopped, cleared or replaced, or a send that was held, stays there. In the desktop app the lane guard names it once, on the lane's next message (it knows the session by its id); in the terminal it names it at the next `lane: <slug>`. The status line keeps the count until the lane marks it done. A retried add is not a second request.
-- **What waits for you, in one place.** The routing table also lists each lane's "Waiting for <owner>" items (each approval a lane needs, with its link), its due follow-ups and its pending requests, with the totals at the top. Ask the conductor "what do you need from me?".
-- **Cost:** two turns per request (the conductor's and the lane's). The inbox, the waiting list and the follow-ups are code: no model call, and the lane guard adds a note to a lane's context only when something is new.
-- **Routing eval:** `sh tests/conductor-eval.sh` runs a real Claude session in classify-only mode on requests with known lanes (Haiku by default, `LANES_EVAL_MODEL=opus` for more).
+You can archive any session, a lane's included, at any time. The plugin only stops the app from archiving a lane by itself.
 
-## A pull request never archives a lane
+The Claude desktop app can archive a session when a PR that the session touched is merged or closed (the auto-archive setting, in Settings, under Claude Code). This is correct for a task session, but it ends a lane. The app copies the setting into each session as the switch `auto_archive_on_close`, and only the session can turn its own copy off: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`. Unbinding the PR does not change the switch.
 
-You can archive any session, a lane's included, whenever you want: no guard stops you. What lanes prevents is the app archiving a lane by itself. The Claude desktop app can archive a session when a PR it touched merges or closes (its auto-archive setting, in Settings, under Claude Code). That suits a task session and kills a lane. The app copies the setting into each session as the switch `auto_archive_on_close`, and **only the session can turn its own copy off**: `mcp__ccd_pr__set_monitor` with `{"auto_archive_on_close": false}`. Unbinding the PR does not change it.
+Each `lane: <slug>` tells the model to check the switch. As a backup, `lane-pr-guard.mjs` stops `gh pr create` in a lane session unless the command has `# lane-pr: ok`. This was tested on 2026-11-12 with six lanes: with the switch off, a PR was closed and each session stayed active.
 
-Each `lane: <slug>` reminds the model to check the switch, and claims the lane in `lanes.json` for that session, so a replaced or restored session never leaves a stale id behind. Tested on 2026-11-12 on six lanes: switch off, a PR closed, every session still active.
+## Status line
 
-**What this relies on.** The per-session switch, the `mcp__ccd_*` tools and the `local_...` session id in `CLAUDE_CODE_HOST_SESSION_ID` are internals of the Claude desktop app. Anthropic does not document them (checked 2026-11-12), so they can change. Where they are missing, these steps are skipped: the lane guard and the lane PR guard do nothing outside the desktop app, and the account setting applies as usual.
+`scripts/statusline.mjs` prints `lane: <name>` in a lane session, and nothing in other sessions. It finds the lane by the session id in `lanes.json`, or by the session's first message (`lane: <slug>` or `new: lane <slug>`), so it also works after a `/clear` in the terminal. It adds `, 1 due` when follow-ups are due, `, inbox 2` when the inbox has pending requests, and `, state file 22k chars` when the state file is over the cap. Suggested by [@buswe_com](https://x.com/buswe_com).
 
-## Keeping state files small
-
-A state file that only grows carries old decisions into work where they no longer apply. Two rules keep it small:
-
-- **A fixed shape, rewritten, with a cap.** Sections: Now, Waiting for the owner, Decisions to keep (dated, with the why), Done this week, Where things are ([`templates/lane-state.md`](templates/lane-state.md)). Each update rewrites the file; nothing is appended. One fact per bullet, under 300 characters. The cap is in characters, 12,000 (about 3,000 tokens), not lines: a line cap is dodged by merging bullets into one long line. The status line adds `, state file 22k chars` when the file is over the cap.
-- **A trim at every clear.** On `lane: <slug>`, the lane guard tells the model to trim the file before new work, and names the Done items older than 7 days, a file over the cap and the bullets over 300 characters. The model deletes finished work, checks each decision against the code, and moves rules that will outlive the work to CLAUDE.md or the docs.
-
-- **A link, not a copy.** A fact that git, a PR or the docs already hold is a link in the state file.
-
-**Follow-ups (0.5.0).** A bullet with `(due YYYY-MM-DD)` is a follow-up the lane set for itself ("check the reviewer's reply"). No scheduler wakes a lane, on purpose: each wake would cost a model turn. When the date comes (the owner's local date), the status line adds `, 1 due` and the conductor's table lists it; the lane guard names it once, on the lane's next message in the desktop app and at the next `lane: <slug>` everywhere.
-
-The limits are in `.claude/brain.json`: `"stateFile": { "maxChars": 12000, "maxBulletChars": 300, "doneDays": 7 }`. The monthly `dreaming` pass still does the deeper check.
-
-## Status line: see which lane you are typing into
-
-`scripts/statusline.mjs` prints `lane: <name>` in a lane session and nothing elsewhere. It finds the lane by the session id in `lanes.json`, or by the session's first message (`lane: <slug>` or `new: lane <slug>`), so it still works after a `/clear` in the terminal. Idea from [@buswe_com](https://x.com/buswe_com).
-
-A plugin cannot set the status line, and the plugin's folder changes with each version, so add this to `~/.claude/settings.json` (or the project's `.claude/settings.json`). It runs the newest installed copy:
+A plugin cannot set the status line, and the plugin folder changes with each version. So add this to `~/.claude/settings.json` (or to the project's `.claude/settings.json`). It runs the newest installed copy:
 
 ```json
 {
@@ -126,24 +148,30 @@ A plugin cannot set the status line, and the plugin's folder changes with each v
 }
 ```
 
-It also adds `, 1 due` when follow-ups are due and `, inbox 2` when the lane's inbox has pending requests. It reads the plugin cache under `~/.claude/plugins`; if you set `CLAUDE_CODE_PLUGIN_CACHE_DIR`, change the path in the line. On Windows it needs `sh` (Git Bash). `LANES_STATUSLINE_FORMAT` changes the text (default `lane: {name}`; `{slug}` also works). If you already have a status line, call the script from yours and print both. The status line shows in the terminal; the desktop app does not document one.
+- It reads the plugin cache under `~/.claude/plugins`. If you set `CLAUDE_CODE_PLUGIN_CACHE_DIR`, change the path in the line.
+- On Windows it needs `sh` (Git Bash).
+- `LANES_STATUSLINE_FORMAT` changes the text (default `lane: {name}`; `{slug}` also works).
+- If you already have a status line, call the script from yours and print both.
+- The status line shows in the terminal. The desktop app does not document one.
 
-## What each hook does, and does not do
+## Hooks
 
 | Hook | Event | Stops | Does not |
 |---|---|---|---|
-| `lane-guard.mjs` | UserPromptSubmit | The first message of a new session that matches a lane with a session. On a lane's own messages it stops nothing, and names new inbox requests and due follow-ups once | Call a model. It matches keywords in code. A tie between two lanes passes. |
-| `second-reader-guard.mjs` | PreToolUse (Bash) | `git commit` of a covered file without a `Second-Reader:` line | Prove that the read happened. The line is the session's statement. |
-| `main-push-guard.mjs` | PreToolUse (Bash) | An agent's push that writes to the protected branch | Stop a push you type in a terminal. Use server-side protection for that. |
-| `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (Claude desktop app only) | Anything outside the desktop app. The real fix is the session's own switch: see "A pull request never archives a lane". |
+| `lane-guard.mjs` | UserPromptSubmit | The first message of a new session that matches a lane with a session. On a lane's own messages it stops nothing, and names new inbox requests and due follow-ups once. | Call a model. It matches keywords in code. When two lanes match equally, the message passes. |
+| `second-reader-guard.mjs` | PreToolUse (Bash) | `git commit` of a covered file without a `Second-Reader:` line. | Prove that the read happened. The line is the session's statement. |
+| `main-push-guard.mjs` | PreToolUse (Bash) | An agent's push that writes to the protected branch. | Stop a push that you type in a terminal. Use server-side protection for that. |
+| `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (desktop app only). | Anything outside the desktop app. The real fix is the session's own switch: see "Archive switch (desktop app)". |
 
-**What the guards are, and are not.** They are guard rails for an honest agent's ordinary commands, not a security boundary. A command written to get around them gets around them: `bash -c "git push origin main"`, a script file, a git alias. Every PreToolUse guard that reads command text has this limit. For a hard rule, use server-side protection (GitHub branch protection, required reviews).
+**Limits.** The hooks are guard rails for an agent's ordinary commands, not a security boundary. A command written to get around them can do so: `bash -c "git push origin main"`, a script file, a git alias. Every PreToolUse hook that reads command text has this limit. For a rule that must hold, use server-side protection (GitHub branch protection, required reviews).
 
-Every hook fails open: an error of its own, or a value of the wrong type in `brain.json`, lets the action through. Each hook also has a timeout (5 s for the lane guard, 10 s for the others), so a hung `git` call cannot stall your session. A guard that breaks your work is worse than no guard.
+**Failures.** Every hook fails open: an error in the hook, or a value of the wrong type in `brain.json`, lets the action through, so a fault in a guard does not stop your work. Each hook has a timeout (5 s for the lane guard, 10 s for the others), so a `git` call that hangs cannot stop your session.
 
-## Prior art
+**Undocumented app behavior.** The per-session archive switch, the `mcp__ccd_*` tools and the `local_...` session id in `CLAUDE_CODE_HOST_SESSION_ID` are internals of the Claude desktop app. Anthropic does not document them (checked 2026-11-12), so they can change. Where they are missing, the steps that use them are skipped: the session claim, the inbox note on a lane's next message and the lane PR guard do nothing outside the desktop app, and the account archive setting applies as usual.
 
-These ideas are not new on their own. Anthropic's [long-running agent harness](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) keeps a progress file between sessions; [Letta's sleep-time compute](https://www.letta.com/blog/sleep-time-compute) consolidates memory away from live work; [pstack](https://github.com/cursor/plugins/tree/main/pstack) by Lauren Tan (poteto) routes each task to the right playbook; [agent-skills](https://github.com/addyosmani/agent-skills) by Addy Osmani packages engineering workflows as skills. What Lanes adds is the combination: a fixed registry of long-lived sessions, one state file each, and a hook that turns a duplicate session away at its first message.
+## Related work
+
+These ideas exist elsewhere. Anthropic's [long-running agent harness](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) keeps a progress file between sessions. [Letta's sleep-time compute](https://www.letta.com/blog/sleep-time-compute) consolidates memory away from live work. [pstack](https://github.com/cursor/plugins/tree/main/pstack) by Lauren Tan (poteto) routes each task to a playbook. [agent-skills](https://github.com/addyosmani/agent-skills) by Addy Osmani packages engineering workflows as skills. Anthropic's [Building always-on agents](https://claude.com/resources/articles/building-always-on-agents) describes an event inbox, timers and approvals that wait. Lanes combines a fixed registry of long-lived sessions, one state file for each, and a hook that stops a duplicate session at its first message.
 
 ## Tests
 
@@ -152,13 +180,17 @@ node --test tests/*.test.mjs
 LANES_ORACLE=1 node --test tests/oracle.test.mjs
 ```
 
-No dependencies. Each hook runs in a temporary git repository with a made-up project config. The second line lets **git be the judge**: about 1,000 generated push and commit commands run for real against scratch repositories, and each guard must have stopped exactly the ones that moved the protected branch or committed a covered file. It takes a few minutes and runs in CI as its own job.
+- The tests have no dependencies. Each hook runs in a temporary git repository with a test project config.
+- The second command uses git as the judge. About 1,000 generated push and commit commands run against scratch repositories, and each guard must stop exactly the commands that changed the protected branch or committed a covered file. It takes a few minutes and runs in CI as a separate job.
 
 ```
 sh tests/live.sh
 ```
 
-The live test runs the plugin in a **real Claude Code session**: Claude is asked to push to the protected branch, commit a covered file, start lane work in a new session and claim a lane, and the test checks on disk what happened. It first checks that Claude can answer, so a run where Claude never ran fails instead of passing. It needs a signed-in Claude Code and costs a few cents on Haiku, so it is not in CI: run it before a release. `LANES_FROM_GITHUB=1` tests the published plugin instead of this checkout.
+- The live test runs the plugin in a real Claude Code session. Claude is asked to push to the protected branch, commit a covered file, start lane work in a new session and claim a lane; the test then checks on disk what happened.
+- It first checks that Claude can answer, so a run in which Claude did not run fails.
+- It needs a signed-in Claude Code and costs a few cents on Haiku, so it is not in CI. Run it before a release.
+- `LANES_FROM_GITHUB=1` tests the published plugin instead of this checkout.
 
 ## License
 
