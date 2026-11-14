@@ -200,7 +200,9 @@ function main() {
   const prompt = String(input?.prompt ?? '')
   if (!prompt.trim() || !existsSync(REGISTRY)) return 0
   const data = JSON.parse(readFileSync(REGISTRY, 'utf8'))
-  const lanes = Array.isArray(data?.lanes) ? data.lanes : []
+  const all = Array.isArray(data?.lanes) ? data.lanes : []
+  // A retired lane (`"retired": "<date>"`, scripts/retire-lane.mjs, 0.4.1) routes nothing and blocks nothing.
+  const lanes = all.filter((l) => !l?.retired)
   const dir = path.dirname(REGISTRY)
 
   const lead = prompt.trimStart()
@@ -208,6 +210,15 @@ function main() {
   const laneCall = /^lane:\s*([^\n]+)/i.exec(lead)
   if (laneCall) {
     const lane = findLane(lanes, laneCall[1])
+    const retired = lane ? null : findLane(all.filter((l) => l?.retired), laneCall[1])
+    if (retired) {
+      process.stdout.write(
+        `The "${retired.name || retired.slug}" lane was retired on ${retired.retired}: this session does not become it. ` +
+          'Tell the owner, and ask whether this work belongs to another lane or to a new session. To bring the lane back, ' +
+          `remove "retired" from its entry in ${REGISTRY} and move ${path.join(dir, 'retired', `${retired.slug}.md`)} back.\n`,
+      )
+      return 0
+    }
     if (lane) {
       const file = path.join(dir, `${lane.slug}.md`)
       const me = process.env.CLAUDE_CODE_HOST_SESSION_ID
