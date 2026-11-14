@@ -1,17 +1,20 @@
 # Lanes
 
-Long Claude Code sessions forget what they knew. Each compaction keeps a summary of a summary.
-Fresh sessions multiply: after a week, ten of them each hold part of the story, and none of them holds all of it.
+A Claude Code plugin that splits work into a few long-lived sessions, called lanes, each with its own state file.
 
-Lanes is the setup one founder uses to run a whole company's code with Claude Code, packaged as a plugin:
+The problem: a long session loses detail at each compaction, because each summary is made from the previous one. Starting new sessions instead spreads the context over many sessions, and no single session has all of it.
 
-- **One lane per kind of work.** Each lane is ONE session that lives for months, plus ONE state file outside git that the session rereads after every clear. The conversation can go; the state stays.
-- **A lane guard.** A hook reads the first message of every new session. If that work already has a lane, it stops the message and names the session to continue in. `new:` overrides it. `lane: <slug>` resumes a lane after a clear.
-- **A second reader.** A hook stops a commit of your riskiest files (billing, auth, consent: you list them) until a fresh agent that did not write the change has read the staged diff.
-- **A push guard.** A hook stops an agent's push to your protected branch, so every change goes through a pull request and CI. Free, for repos where GitHub branch protection is not available.
-- **A dreaming pass.** A monthly skill that checks your notes against the code, merges duplicates and lists rules that no longer carry load.
+What the plugin provides:
 
-The full story, with what worked and what did not: [One person, six lanes](https://pulseos.finance/blog/one-person-six-lanes).
+- **Lanes.** One session per kind of work, and one state file per lane, kept outside git. The session reads its state file again after each clear, so the state stays when the conversation goes.
+- **A lane guard.** A hook that reads the first message of each new session. When the message matches a lane that already has a session, the hook stops it and names that session. `new:` starts a new session anyway. `lane: <slug>` resumes a lane after a clear.
+- **A conductor (optional).** One lane that takes your requests, sends each one to the right lane and lists what waits for you. Each request is written to the lane's inbox file before it is sent.
+- **Follow-ups.** A state-file line with `(due YYYY-MM-DD)` shows in the status line, the conductor's list and the lane's next message when the date comes. Nothing runs on a schedule.
+- **A second reader.** A hook that stops a commit of the files you mark as high risk until a fresh agent, which did not write the change, has read the staged diff.
+- **A push guard.** A hook that stops an agent's push to your protected branch, so changes go through a pull request and CI. Useful where GitHub branch protection is not available.
+- **A dreaming pass.** A skill you run by name that checks your notes against the code, merges duplicates and lists rules that no longer apply.
+
+The hooks are guard rails for an agent that follows the rules, not a security boundary: see "What each hook does, and does not do". The plugin was made for one project and is shared as it is. How it is used there: [One person, six lanes](https://pulseos.finance/blog/one-person-six-lanes).
 
 ## Install
 
