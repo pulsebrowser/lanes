@@ -11,6 +11,7 @@
  *   stateFile         { maxChars, maxBulletChars, doneDays }: a lane state file over maxChars (12000, about 3000
  *                     tokens) is flagged, bullets over maxBulletChars (300) are counted, and "Done" items older than
  *                     doneDays (7) are named for deletion, on each `lane: <slug>` (state-file.mjs).
+ *   inbox             { keepDays }: done and moved inbox requests are kept this many days (60) for lane-report.mjs.
  *   secondReader      { coveredFiles, verifyCommand, skill }: the JSON map of area -> covered paths (relative to
  *                     the project), the command that checks an area, and the skill a fresh reader follows.
  *
@@ -26,6 +27,7 @@ const DEFAULTS = {
   lanesDir: null, // default: ~/.claude/lanes/<project folder name>
   scheduledTasksDir: '~/.claude/scheduled-tasks',
   stateFile: { maxChars: 12000, maxBulletChars: 300, doneDays: 7 },
+  inbox: { keepDays: 60 },
   secondReader: {
     coveredFiles: '.claude/covered-files.json',
     verifyCommand: null, // optional: a check that must pass before the read, e.g. a model checker
@@ -59,11 +61,13 @@ export function loadBrainConfig() {
   }
   if (!isObject(file)) file = {}
   const stateFile = isObject(file.stateFile) ? file.stateFile : {}
+  const inbox = isObject(file.inbox) ? file.inbox : {}
   const secondReader = isObject(file.secondReader) ? file.secondReader : {}
   const cfg = {
     owner: str(file.owner, DEFAULTS.owner),
     protectedBranch: str(file.protectedBranch, DEFAULTS.protectedBranch),
     stateFile: { ...DEFAULTS.stateFile, ...stateFile },
+    inbox: { ...DEFAULTS.inbox, ...inbox },
     secondReader: {
       coveredFiles: str(secondReader.coveredFiles, DEFAULTS.secondReader.coveredFiles),
       verifyCommand: str(secondReader.verifyCommand, DEFAULTS.secondReader.verifyCommand),

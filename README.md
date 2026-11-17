@@ -54,6 +54,7 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
   "lanesDir": "~/.claude/lanes/my-project",
   "scheduledTasksDir": "~/.claude/scheduled-tasks",
   "stateFile": { "maxChars": 12000, "maxBulletChars": 300, "doneDays": 7 },
+  "inbox": { "keepDays": 60 },
   "secondReader": {
     "coveredFiles": ".claude/covered-files.json",
     "verifyCommand": null,
@@ -70,7 +71,8 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 | `scheduledTasksDir` | Scheduled task runs pass the lane guard. | `~/.claude/scheduled-tasks` |
 | `stateFile.maxChars` | The cap on a state file, in characters. | `12000` |
 | `stateFile.maxBulletChars` | The cap on one bullet, in characters. | `300` |
-| `stateFile.doneDays` | "Done" items older than this many days are named for deletion. Done inbox requests are dropped after the same number of days. | `7` |
+| `stateFile.doneDays` | "Done" items older than this many days are named for deletion. | `7` |
+| `inbox.keepDays` | Done and moved inbox requests are kept this many days, for `lane-report.mjs`, then dropped. | `60` |
 | `secondReader.coveredFiles` | A JSON map of area to paths (a path that ends in `/` covers a folder). With no file, the second reader checks nothing. | `.claude/covered-files.json` |
 | `secondReader.verifyCommand` | An optional check that must pass before the read (a model checker, a test target). | none |
 
@@ -101,15 +103,35 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 
 ## The conductor
 
-The conductor is one more lane, with `"role": "conductor"` in `lanes.json`. You type or talk to it. For each request it finds the lane, asks one short question when two lanes fit or none does, sends a full brief to that lane's session with `SendMessage`, and gives you the answer. To start it, open a new session with the first message `lane: conductor`.
+The conductor is one more lane, with `"role": "conductor"` in `lanes.json`. You type or talk to it. For each request it finds the lane, asks one short question when two lanes fit or none does, sends a full brief to that lane's session with `SendMessage`, and gives you a link to that session. The lane answers you there. To start it, open a new session with the first message `lane: conductor`.
 
 - **Routing.** `scripts/conductor-lanes.mjs` prints a table of the lanes: each lane's description, session, keywords and the first lines of its "Now" section. The conductor's model reads the table and picks the lane. There is no separate classifier; this is the simplest form of the [routing pattern](https://www.anthropic.com/engineering/building-effective-agents).
-- **The inbox.** Before it sends a brief, the conductor writes it to the lane's inbox, `<lanesDir>/<slug>.inbox.json` (`scripts/lane-inbox.mjs add|list|done`). If the send is held, or the lane session was stopped, cleared or replaced, the request stays in the inbox. The lane guard names new requests once (on the lane's next message in the desktop app, at the next `lane: <slug>` in the terminal), and the status line shows `, inbox 2` until the lane marks them done. The same request added twice is kept once.
+- **Route, do not relay.** The conductor does not rewrite a lane's answer for you. Each summary of a summary loses detail, so you read the full answer in the lane. A lane writes to the conductor only when the routing changes ("not my lane", "blocked on another lane"). The conductor quotes a lane's answer only when you ask for it. This follows Anthropic's [When to fold subagents into your main agent loop](https://claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop): a full handoff is right when the agent must talk to the user, and each extra handoff is a "telephone game".
+- **The inbox.** Before it sends a brief, the conductor writes it to the lane's inbox, `<lanesDir>/<slug>.inbox.json` (`scripts/lane-inbox.mjs`, see "Measure routing"). If the send is held, or the lane session was stopped, cleared or replaced, the request stays in the inbox. The lane guard names new requests once (on the lane's next message in the desktop app, at the next `lane: <slug>` in the terminal), and the status line shows `, inbox 2` until the lane marks them done. The same request added twice is kept once.
 - **What waits for you.** The table also lists, for each lane, its "Waiting for <owner>" items, its due follow-ups and its pending requests, with totals at the top. Ask the conductor "what do you need from me?".
 - **Approvals.** In Claude Code, a message from another session cannot approve anything. A merge, a deploy or a permission prompt in a lane still needs you in that lane. The conductor tells you which lane, with a link.
 - **The lane guard.** It still checks new sessions by keyword. It never stops the conductor, and when it stops a new session it names the conductor as another way.
 - **Cost.** Each request takes two turns: the conductor's and the lane's. The inbox, the table and the follow-ups are code, with no model call. The lane guard adds a note to a lane's context only when something is new.
-- **Routing eval.** `sh tests/conductor-eval.sh` runs a real Claude session in classify-only mode on requests whose lane is known (Haiku by default; `LANES_EVAL_MODEL=opus` for a larger model).
+- **Routing eval (before a change).** `sh tests/conductor-eval.sh` runs a real Claude session in classify-only mode on requests whose lane is known (Haiku by default; `LANES_EVAL_MODEL=opus` for a larger model).
+
+## Measure routing
+
+Each inbox request records how it was routed. The commands that set the fields are in `scripts/lane-inbox.mjs`:
+
+| Command | Who runs it | What it records |
+|---|---|---|
+| `add <slug> --from <id> --file <path>` | the conductor | the lane chosen (`lane`), `hops: 1`, and the arrival time (`at`, `firstAt`) |
+| `answered <slug> <id>` | the lane | the time of its first answer to the owner (`answeredAt`) |
+| `done <slug> <id>` | the lane | the time it was finished (`doneAt`). Without an `answered` first, the answer time is set to the done time and marked as a guess. |
+| `reroute <slug> <id> <to-slug>` | the conductor | the request moved to another lane: the old lane keeps a closed copy (`rerouted`), and the new lane gets `hops + 1` and the first arrival time. A request moved back to a lane it left gets the id `<id>.h<hops>` there. After four lanes the command refuses: the owner decides. It also moves a pending request out of a retired lane. |
+| `redone <slug> <id>` | the lane | the owner sent it back: the request opens again, and `redone` counts how many times |
+| `list <slug> [--all]` | anyone | the pending requests, or all of them |
+
+Requests written before these fields existed still read: they count as one hop, first lane right, with no answer time.
+
+`node <plugin>/scripts/lane-report.mjs [--days 14] [--json]` prints, per lane, the requests, done, open, moved out, moved in, redone, and the median times to the first answer and to done, each with the number of requests it stands on. In all, it prints how many requests the first lane kept (the routing accuracy) and the mean number of lanes a finished request went through. Ask the conductor "how is routing going?" to run it.
+
+Use the report to decide whether to merge or split lanes, and only after a few weeks of data: a figure from a handful of requests says little.
 
 ## Retire a lane
 
