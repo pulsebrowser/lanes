@@ -4,6 +4,7 @@
   "lanesDir": "~/.claude/lanes/my-project",
   "scheduledTasksDir": "~/.claude/scheduled-tasks",
   "stateFile": { "maxChars": 12000, "maxBulletChars": 300, "doneDays": 7 },
+  "inbox": { "keepDays": 60 },
   "secondReader": {
     "coveredFiles": ".claude/covered-files.json",
     "verifyCommand": null,

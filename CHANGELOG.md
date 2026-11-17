@@ -11,6 +11,18 @@ claude plugin update lanes@lanes
 
 Then run `/reload-plugins` in each running session, or restart it: a session keeps the hooks it loaded until then. Read the "After updating" lines of each version you skipped.
 
+## 0.6.0 (2026-11-17)
+
+From Anthropic's [When to fold subagents into your main agent loop](https://claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop): each handoff that summarizes loses detail (the "telephone game"); a full handoff is right when the agent must talk to the user; measure, change one thing at a time, keep what holds up.
+
+- **The conductor routes; it does not relay.** It records the request, sends the brief and gives the owner a link to the lane session, where the lane answers. Before, each answer went through two summaries: the lane's note to the conductor, then the conductor's rewrite. The lane now writes to the conductor only when the routing changes (`not my lane`, `blocked on <lane>`), and the conductor quotes a lane's answer only when the owner asks. A message from another session still approves nothing.
+- **Routing is measured.** Inbox items record the lane chosen, the hops, reroutes, the time of the lane's first answer and of done, and how many times the work was redone. New `lane-inbox.mjs` commands: `answered`, `reroute <slug> <id> <to-slug>`, `redone`. Items written before 0.6.0 still read.
+- **`scripts/lane-report.mjs [--days N] [--json]`** prints these per lane, with the count beside each figure, plus the share of requests the first lane kept. Decide lane merges or splits on weeks of data, not on a few requests.
+- A move is safe under races: `reroute` first closes the request in the old lane under that lane's lock, then adds it to the new one, and puts it back if the new lane refuses. So a request is never open in two lanes at once, and never in none. A request moved back to a lane it left gets a new id there (`<id>.h<hops>`); after four lanes the owner decides; a retired lane's pending requests can be moved out. A second read found these and five more cases; each fix has a test that fails on the code before it.
+- Done and moved inbox items are now kept `inbox.keepDays` days (default 60, new in `brain.json`) so the report has data; they were dropped after `stateFile.doneDays` (7).
+
+**After updating:** run `/reload-plugins` in the conductor and in each lane, so the conductor stops relaying and the lanes mark `answered` and `done`. Nothing else to do: old inbox items still read.
+
 ## 0.5.0 (2026-11-14)
 
 Ideas from Anthropic's article [Building always-on agents](https://claude.com/resources/articles/building-always-on-agents) (an event inbox, timers the agent sets for itself, approvals as requests that wait, store only what cannot be looked up), kept to what one owner on one machine needs. No scheduler and no runs nobody watches: every part is code, with no model call.
