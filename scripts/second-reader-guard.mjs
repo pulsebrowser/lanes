@@ -5,141 +5,49 @@
  * It stops a `git commit` that includes a covered file (the JSON map `secondReader.coveredFiles` of
  * .claude/brain.json: area -> paths; a path ending in / covers a folder) when the commit message has no
  * `Second-Reader:` line. The step itself is the second-reader skill: a fresh agent that did not write the change
- * reads the staged diff. With no covered-files file the hook does nothing.
+ * reads the staged diff. With no covered-files list (in the working tree or on the base branch) the hook does nothing.
+ *
+ * Since 0.6.1 the gate cannot be edited by the change it judges (rules.mjs): the list is read from the base branch
+ * too and the union counts, so a commit that drops a file from the list, or deletes the list, still needs the line;
+ * and a commit that changes the rule files themselves (brain.json, a covered list) needs it as well. Its mode
+ * (`guards.secondReader`: off, observe, enforce) and the let-through after two blocks are in guard-mode.mjs.
  *
  * Limits, on purpose:
  * - It checks agent sessions only. A commit typed by a person in a terminal does not go through it.
  * - The line is a statement by the session, not a proof that the read happened.
  * - It fails OPEN: on any error of its own (no git, bad JSON, no list) the commit goes through.
  *
- * Input: the hook JSON on stdin ({ tool_name, tool_input: { command }, cwd }). Exit 2 blocks; stderr goes to the agent.
+ * Input: the hook JSON on stdin ({ tool_name, tool_input: { command }, cwd, session_id }). Exit 2 blocks; stderr goes
+ * to the agent.
  */
-import { readFileSync, existsSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
-import path from 'node:path'
-import { loadBrainConfig, GIT_PREFIX } from './brain-config.mjs'
+import { readFileSync } from 'node:fs'
+import { loadBrainConfig } from './brain-config.mjs'
+import { safeRules } from './rules.mjs'
+import { decide, letThroughOutput, recordPass } from './guard-mode.mjs'
+import { COMMIT, commitFiles, commitMessage } from './commit-parse.mjs'
 
 const CONFIG = loadBrainConfig()
 const READER = CONFIG.secondReader
-const COMMIT = new RegExp(GIT_PREFIX + String.raw`commit(?=\s|$)`, 'g')
-const ADD = new RegExp(GIT_PREFIX + String.raw`add\s+([^;&|\n]+)`, 'g')
 // The trailer at a line start, after a quote, or after an escaped newline inside `printf '...\n...'`.
 const TRAILER = /(?:^|[\n"']|\\n)[ \t]*Second-Reader:[ \t]*[A-Za-z0-9]/
-// Options of `git commit` that take a value, so the value is not read as a path.
-const COMMIT_VALUE_OPTS = new Set(['-m', '--message', '-F', '--file', '-c', '-C', '--reuse-message', '--reedit-message',
-  '--author', '--date', '--fixup', '--squash', '-t', '--template', '--cleanup', '--trailer'])
-// A cluster of short flags ending in one that takes a value: `-am <msg>`, `-sm`, `-vm`, `-aF <file>`.
-const VALUE_CLUSTER = /^-[a-zA-Z]*[mFCct]$/
-const unquote = (s) => s.replace(/^["']|["']$/g, '')
-const words = (s) => (s.match(/"[^"]*"|'[^']*'|\S+/g) || []).map(unquote)
+const RULES_AREA = 'guard rules'
 
-/** Where a git command at `index` runs: `git -C <dir>`, else the last `cd <dir>` before it, else the session's dir. */
-function dirFor(command, index, options, base) {
-  const dashC = /-C(?:=|\s+)("[^"]+"|'[^']+'|\S+)/.exec(options || '')
-  if (dashC) return path.resolve(base, unquote(dashC[1]))
-  const cds = [...command.slice(0, index).matchAll(/(?:^|[;&|(]\s*)cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/g)]
-  return cds.length ? path.resolve(base, unquote(cds[cds.length - 1][1])) : base
-}
-
-/**
- * The text of ONE command, from `rest` up to its end: the first `;`, `&`, `|` or newline that is outside quotes and
- * outside `$( ... )`. A heredoc (`<<EOF ... EOF`) is part of its command. So `git commit -m "$(cat <<'EOF' ... EOF
- * )"` is one command, and `git commit -m x && echo "Second-Reader: y"` is not.
- */
-function ownCommand(rest) {
-  let quote = null
-  let depth = 0
-  const heredocs = []
-  for (let i = 0; i < rest.length; i++) {
-    const c = rest[i]
-    if (quote) { if (c === quote) quote = null; else if (c === '\\' && quote === '"') i++; continue }
-    if (c === "'" || c === '"') { quote = c; continue }
-    if (c === '\\') { i++; continue }
-    if (c === '$' && rest[i + 1] === '(') { depth++; i++; continue }
-    if (c === ')' && depth > 0) { depth--; continue }
-    const doc = /^<<-?\s*(['"]?)([A-Za-z_][\w]*)\1/.exec(rest.slice(i))
-    if (doc) { heredocs.push(doc[2]); i += doc[0].length - 1; continue }
-    if (c === '\n' && heredocs.length) {
-      // skip the heredoc bodies: up to the line that is exactly the terminator
-      for (const end of heredocs.splice(0)) {
-        const m = new RegExp(`\\n[ \\t]*${end}[ \\t]*(?=\\n|$)`).exec(rest.slice(i))
-        if (!m) return rest
-        i += m.index + m[0].length - 1
-      }
-      continue
-    }
-    if (depth === 0 && (c === ';' || c === '&' || c === '|' || c === '\n')) return rest.slice(0, i)
-  }
-  return rest
-}
+const matches = (f, e) => (e.endsWith('/') ? f.startsWith(e) || f + '/' === e : f === e)
 
 /** Checks ONE `git commit` of the command. Returns the covered files it would commit without a trailer, by area. */
-function check(command, hit, base, covered) {
-  const dir = dirFor(command, hit.index, hit[1], base)
-  const gitIn = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    .split('\n').map((l) => l.trim()).filter(Boolean)
-  const git = (...args) => gitIn(dir, ...args)
-  // Paths as git sees them from the repository root, for pathspecs that are folders, globs or relative to a `cd`.
-  // One bad pathspec (a path outside the repo, a folder that does not exist) skips only that set, never the check:
-  // the command itself would fail on it too, and the files staged so far are counted anyway.
-  const changedUnder = (cwd, specs) => {
-    if (!specs.length) return []
-    try { return gitIn(cwd, 'ls-files', '-m', '-o', '--exclude-standard', '--full-name', '--', ...specs) } catch { return [] }
-  }
-
-  const rest = command.slice(hit.index + hit[0].length)
-  const segment = ownCommand(rest)
-  const bare = segment.replace(/"[^"]*"|'[^']*'/g, ' ') // the options without the text of quoted messages
-  const files = new Set(git('diff', '--cached', '--name-only'))
-  // `git commit -a` also takes every tracked change.
-  if (/(?:^|\s)(-[a-zA-Z]*a[a-zA-Z]*|--all)(\s|$)/.test(bare)) git('diff', '--name-only').forEach((f) => files.add(f))
-  // `git commit <paths>` or `git commit -- <paths>` commits those paths.
-  const commitWords = words(segment)
-  const specs = []
-  for (let i = 0; i < commitWords.length; i++) {
-    const w = commitWords[i]
-    if (w === '--') { specs.push(...commitWords.slice(i + 1)); break }
-    if (COMMIT_VALUE_OPTS.has(w) || VALUE_CLUSTER.test(w)) { i++; continue }
-    if (w.startsWith('-')) continue
-    if (existsSync(path.resolve(dir, w))) specs.push(w) // a word of a message is not a path on disk
-  }
-  changedUnder(dir, specs).forEach((f) => files.add(f))
-  // `git add <paths> && git commit` in one command: the paths are not staged yet when this hook runs.
-  for (const add of command.slice(0, hit.index).matchAll(ADD)) {
-    const addDir = dirFor(command, add.index, add[1], base)
-    const tokens = words(add[2])
-    // -A and -u stage the WHOLE repository from any folder (`:/` is git's name for the top), `.` only the folder.
-    const all = tokens.some((t) => t === '-A' || t === '--all' || t === '-u' || t === '--update')
-    const paths = tokens.filter((t) => !t.startsWith('-'))
-    changedUnder(addDir, all ? [':/'] : paths).forEach((f) => files.add(f))
-    // `git add -f` stages an ignored file, which ls-files --exclude-standard hides: count the paths as written.
-    if (tokens.some((t) => t === '-f' || t === '--force')) {
-      let prefix = ''
-      try { prefix = gitIn(addDir, 'rev-parse', '--show-prefix')[0] || '' } catch { /* not a repo: nothing to add */ }
-      paths.forEach((t) => files.add(path.posix.normalize(prefix + t)))
-    }
-  }
-
+function check(command, hit, base, rules) {
+  const { files } = commitFiles(command, hit, base)
   const areas = new Map()
   for (const f of files) {
-    for (const [area, entries] of Object.entries(covered)) {
-      if (!Array.isArray(entries)) continue
-      if (entries.some((e) => (e.endsWith('/') ? f.startsWith(e) || f + '/' === e : f === e))) {
+    for (const [area, entries] of Object.entries(rules.covered)) {
+      if (Array.isArray(entries) && entries.some((e) => typeof e === 'string' && matches(f, e))) {
         areas.set(area, [...(areas.get(area) || []), f])
       }
     }
+    if (rules.ruleFiles.includes(f)) areas.set(RULES_AREA, [...(areas.get(RULES_AREA) || []), f])
   }
   if (!areas.size) return null
-
-  // The message: this command's own text (-m, a heredoc), or the file given to -F. Never text after it.
-  let message = segment
-  const dashF = /\s(?:-[a-zA-Z]*F\s*|--file(?:=|\s+))("[^"]+"|'[^']+'|[^\s;&|]+)/.exec(' ' + bare.replace(/\s+/g, ' ') + ' ') ||
-    /\s(?:-[a-zA-Z]*F\s*|--file(?:=|\s+))("[^"]+"|'[^']+'|[^\s;&|]+)/.exec(' ' + segment)
-  if (dashF) {
-    const p = path.resolve(dir, unquote(dashF[1]))
-    if (existsSync(p)) message += '\n' + readFileSync(p, 'utf8')
-  }
-  return TRAILER.test(message) ? null : areas
+  return TRAILER.test(commitMessage(command, hit, base)) ? null : areas
 }
 
 function main() {
@@ -149,28 +57,40 @@ function main() {
   const command = String(input?.tool_input?.command ?? '')
   const hits = [...command.matchAll(COMMIT)]
   if (!hits.length) return 0
-  const coveredPath = path.resolve(CONFIG.projectDir, READER.coveredFiles)
-  if (!existsSync(coveredPath)) return 0
-  const covered = JSON.parse(readFileSync(coveredPath, 'utf8'))
+  const rules = safeRules(CONFIG)
+  if (!rules.covered || rules.modes.secondReader === 'off') return 0
   const base = input.cwd || process.cwd()
 
   // Every `git commit` in the command is checked, not only the first.
   let areas = null
   for (const hit of hits) {
-    areas = check(command, hit, base, covered)
+    areas = check(command, hit, base, rules)
     if (areas) break
   }
-  if (!areas) return 0
+  if (!areas) { recordPass('secondReader', { config: CONFIG, rules, session: input.session_id }); return 0 }
 
   const lines = [...areas].map(([a, fs]) => `  ${a}: ${fs.slice(0, 4).join(', ')}${fs.length > 4 ? `, and ${fs.length - 4} more` : ''}`)
+  const reason = `commit without Second-Reader of ${[...areas].map(([a, fs]) => `${a} (${fs.slice(0, 2).join(', ')})`).join('; ')}`
+  const d = decide('secondReader', { config: CONFIG, rules, session: input.session_id, reason, escape: true })
+  if (d.letThrough) {
+    process.stdout.write(letThroughOutput({ name: 'second-reader gate', after: d.after, reason, owner: CONFIG.owner, file: CONFIG.guards.log }))
+    return 0
+  }
+  if (!d.block) return 0
+
+  const verifyAreas = [...areas.keys()].filter((a) => a !== RULES_AREA)
   process.stderr.write(
     [
       'Commit stopped: a second reader is necessary.',
       'This commit changes covered files:',
       ...lines,
+      ...(areas.has(RULES_AREA)
+        ? ['', `"${RULES_AREA}" are the files that decide what this gate checks: a change to them is read like a covered file.`,
+          'Until it is merged, the gate keeps the rules of the base branch too (the stricter of the two).']
+        : []),
       '',
       'Do these steps, then commit again:',
-      ...(READER.verifyCommand ? [`  0. Run ${READER.verifyCommand} ${[...areas.keys()].join(' and ')}. It must pass.`] : []),
+      ...(READER.verifyCommand && verifyAreas.length ? [`  0. Run ${READER.verifyCommand} ${verifyAreas.join(' and ')}. It must pass.`] : []),
       `  1. Do the second read (${READER.skill}): a fresh agent reads the staged diff.`,
       '  2. Add a line to the commit message, for example:',
       '       Second-Reader: fresh agent, 2 findings, 2 fixed',

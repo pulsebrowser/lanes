@@ -16,7 +16,7 @@ The hook `second-reader-guard.mjs` stops a commit of a covered file when the mes
 3. Do the second read (below).
 4. Fix or answer each finding. Each fixed finding gets a test that FAILS on the code before the fix: run it there once. If a fix changes a covered file, run step 2 again.
 5. If step 4 changed code, do ONE more second read, of the fix diff only (`git diff` of the fixes). Fixes are where new bugs live. Skip it when no finding needed a code change.
-6. Commit with the `Second-Reader:` line.
+6. Commit with the `Second-Reader:` line, and `second-reader` among the kinds of the `Verified:` line (for example `Verified: tests, second-reader`). A commit that changes `.claude/brain.json` or a covered-files list needs this read too: those files decide what the gate checks.
 
 ## The second read
 

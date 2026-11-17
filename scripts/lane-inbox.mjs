@@ -7,21 +7,25 @@
  *   node scripts/lane-inbox.mjs add <slug> [--from <session id>] [--id <id>] [--file <path>]   # text on stdin, or --file
  *   node scripts/lane-inbox.mjs list <slug> [--all]
  *   node scripts/lane-inbox.mjs answered <slug> <id>          # the lane's first answer to the owner
- *   node scripts/lane-inbox.mjs done <slug> <id> [<id> ...]
+ *   node scripts/lane-inbox.mjs done <slug> <id> [<id> ...] --evidence "<text>"
  *   node scripts/lane-inbox.mjs reroute <slug> <id> <to-slug>  # the conductor: wrong lane, move it
  *   node scripts/lane-inbox.mjs redone <slug> <id>             # the owner said the work must be done again
  *
  * `add` prints the id. The same id, or the same text while still pending, is not added twice (the id of the first is
  * printed): a retried send does not make two requests. Refuses an unknown or retired lane.
+ * `done` needs a short line of evidence (0.6.1): what shows the work is right, as test output, a screenshot path or
+ * a log, or "none: <why>". "Verification means running the change": the line says what was run, and the report counts
+ * the requests finished with none.
  * Env: LANE_REGISTRY (tests: path of lanes.json), CLAUDE_PROJECT_DIR (the project).
  */
 import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { loadBrainConfig, isSafeSlug } from './brain-config.mjs'
 import { withLock, writeWhole } from './lock.mjs'
-import { inboxPath, readInbox, readInboxStrict, oneLine, SAFE_ID, usable, isOpen } from './inbox-file.mjs'
+import { inboxPath, readInbox, readInboxStrict, oneLine, SAFE_ID, usable, isOpen, noneWithoutReason } from './inbox-file.mjs'
 
 const MAX_TEXT = 20000
+const MAX_EVIDENCE = 500
 const DAY = 24 * 60 * 60 * 1000
 const COMMANDS = ['add', 'list', 'answered', 'done', 'reroute', 'redone']
 const MAX_HOPS = 4 // a request moved through four lanes goes to the owner, not to a fifth lane
@@ -31,7 +35,7 @@ const fail = (msg) => { process.stderr.write(msg + '\n', () => process.exit(1));
 
 if (!COMMANDS.includes(cmd) || !isSafeSlug(slug)) {
   await fail('Usage: lane-inbox.mjs add <slug> [--from <id>] [--id <id>] [--file <path>] | list <slug> [--all] | ' +
-    'answered <slug> <id> | done <slug> <id>... | reroute <slug> <id> <to-slug> | redone <slug> <id>')
+    'answered <slug> <id> | done <slug> <id>... --evidence "<text>" | reroute <slug> <id> <to-slug> | redone <slug> <id>')
 }
 const config = loadBrainConfig()
 const registry = process.env.LANE_REGISTRY || path.join(config.lanesDir, 'lanes.json')
@@ -129,6 +133,7 @@ if (cmd === 'add') {
       i.hops > 1 ? `hop ${Number(i.hops)}` : '',
       i.status === 'rerouted' && isSafeSlug(i.reroutedTo) ? `moved to ${i.reroutedTo}` : '',
       Number(i.redone) > 0 ? `redone ${Number(i.redone)}x` : '',
+      i.status === 'done' && i.evidence ? `evidence: ${oneLine(i.evidence, 120)}` : '',
     ].filter(Boolean).join(', ')
     process.stdout.write(`## ${i.id} (${oneLine(i.status, 10)}, ${oneLine(i.at, 16, '').replace('T', ' ')} UTC${i.from ? `, from ${oneLine(i.from, 80)}` : ''}${extra ? `, ${extra}` : ''})\n${quoted}\n\n`)
   }
@@ -137,14 +142,32 @@ if (cmd === 'add') {
   if (r.error) await fail(r.error)
   process.stdout.write(`Answered: ${r.item.id} (${r.item.answeredAt}).\n`)
 } else if (cmd === 'done') {
-  const ids = rest.filter((a) => !a.startsWith('--'))
+  // `--evidence <text>` or `--evidence=<text>`; a word after any `--evidence` is never an id.
+  const values = []
+  const ids = []
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]
+    if (a === '--evidence') { values.push(rest[i + 1] ?? ''); i++ } else if (a.startsWith('--evidence=')) values.push(a.slice(11))
+    else if (!a.startsWith('--')) ids.push(a)
+  }
   if (!ids.length) await fail('Name the id(s) to mark done.')
+  if (values.length > 1) await fail('Give --evidence once.')
+  const evidence = String(values[0] ?? '').replace(/\s+/g, ' ').trim()
+  if (!evidence) {
+    await fail('Say what shows it is done: --evidence "<test output, a screenshot path, a log>", ' +
+      'or --evidence "none: <why>" when nothing was run (a question answered, a decision written down).')
+  }
+  if (noneWithoutReason(evidence)) {
+    await fail('"none" needs its reason: --evidence "none: <why>".')
+  }
+  if ([...evidence].length > MAX_EVIDENCE) await fail(`The evidence is over ${MAX_EVIDENCE} characters: name a file or a log path instead.`)
   const r = change(file, (_items, raw) => {
     const found = []
     for (const i of raw) {
       if (!usable(i) || !ids.includes(i.id) || !isOpen(i)) continue
       i.status = 'done'
       i.doneAt = nowIso()
+      i.evidence = evidence
       // No `answered` before `done`: the answer time is the done time, and the report says so.
       if (!i.answeredAt) { i.answeredAt = i.doneAt; i.answeredWithDone = true }
       found.push(i.id)

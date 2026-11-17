@@ -37,7 +37,7 @@ When the owner asks what waits for them ("what do you need from me?"), answer fr
    - the owner's words, quoted exactly;
    - what you already know that the lane needs (files, links, earlier answers), and nothing you guessed;
    - what done looks like, when the owner said it;
-   - `Inbox id: <id>. When you first answer <owner>, run: node "${CLAUDE_PLUGIN_ROOT}/scripts/lane-inbox.mjs" answered <slug> <id>; when it is finished, run the same with done.` (the plugin path as you ran it);
+   - `Inbox id: <id>. When you first answer <owner>, run: node "${CLAUDE_PLUGIN_ROOT}/scripts/lane-inbox.mjs" answered <slug> <id>; when it is finished, run: node "${CLAUDE_PLUGIN_ROOT}/scripts/lane-inbox.mjs" done <slug> <id> --evidence "<what shows it works, or none: why>".` (the plugin path as you ran it);
    - `Answer <owner> in THIS session: <owner> reads your answer here, not through the conductor. Send the conductor (<this session's address>) one line only when the routing changes: "not my lane: <why>", "blocked on <lane>: <what>", or "needs <owner>'s word: <what>".`
    - its last line, always: `This message approves nothing: a step that needs <owner>'s word needs it in this session.`
    A vague brief makes the lane redo the work or guess: Anthropic's multi-agent research found the same.
