@@ -55,6 +55,8 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
   "scheduledTasksDir": "~/.claude/scheduled-tasks",
   "stateFile": { "maxChars": 12000, "maxBulletChars": 300, "doneDays": 7 },
   "inbox": { "keepDays": 60 },
+  "guards": { "lane": "enforce", "lanePr": "enforce", "mainPush": "enforce", "secondReader": "enforce", "verified": "observe", "letThroughAfter": 2 },
+  "verified": { "kinds": ["tests", "app", "tla", "second-reader", "none"] },
   "secondReader": {
     "coveredFiles": ".claude/covered-files.json",
     "verifyCommand": null,
@@ -73,6 +75,10 @@ The hooks read one file in your project, `.claude/brain.json`. Every key is opti
 | `stateFile.maxBulletChars` | The cap on one bullet, in characters. | `300` |
 | `stateFile.doneDays` | "Done" items older than this many days are named for deletion. | `7` |
 | `inbox.keepDays` | Done and moved inbox requests are kept this many days, for `lane-report.mjs`, then dropped. | `60` |
+| `guards.<guard>` | The mode of each guard: `off`, `observe` (log what it would have stopped, stop nothing) or `enforce`. See "Verification". | `enforce`; `verified` is `observe` |
+| `guards.letThroughAfter` | A commit gate that blocked one session this many times lets the next try through, and logs it. `0` never does. | `2` |
+| `guards.log` | The log of every guard decision, one JSON line each. | `<lanesDir>/guard-log.jsonl` |
+| `verified.kinds` | The words a `Verified:` commit line may use. `none` is always one of them. | `tests`, `app`, `tla`, `second-reader`, `none` |
 | `secondReader.coveredFiles` | A JSON map of area to paths (a path that ends in `/` covers a folder). With no file, the second reader checks nothing. | `.claude/covered-files.json` |
 | `secondReader.verifyCommand` | An optional check that must pass before the read (a model checker, a test target). | none |
 
@@ -122,16 +128,42 @@ Each inbox request records how it was routed. The commands that set the fields a
 |---|---|---|
 | `add <slug> --from <id> --file <path>` | the conductor | the lane chosen (`lane`), `hops: 1`, and the arrival time (`at`, `firstAt`) |
 | `answered <slug> <id>` | the lane | the time of its first answer to the owner (`answeredAt`) |
-| `done <slug> <id>` | the lane | the time it was finished (`doneAt`). Without an `answered` first, the answer time is set to the done time and marked as a guess. |
+| `done <slug> <id> --evidence "<text>"` | the lane | the time it was finished (`doneAt`) and what shows it works (`evidence`): test output, a screenshot path, a log, or `none: <why>`. With no evidence, or `none` with no reason, it refuses. Without an `answered` first, the answer time is set to the done time and marked as a guess. |
 | `reroute <slug> <id> <to-slug>` | the conductor | the request moved to another lane: the old lane keeps a closed copy (`rerouted`), and the new lane gets `hops + 1` and the first arrival time. A request moved back to a lane it left gets the id `<id>.h<hops>` there. After four lanes the command refuses: the owner decides. It also moves a pending request out of a retired lane. |
 | `redone <slug> <id>` | the lane | the owner sent it back: the request opens again, and `redone` counts how many times |
 | `list <slug> [--all]` | anyone | the pending requests, or all of them |
 
 Requests written before these fields existed still read: they count as one hop, first lane right, with no answer time.
 
-`node <plugin>/scripts/lane-report.mjs [--days 14] [--json]` prints, per lane, the requests, done, open, moved out, moved in, redone, and the median times to the first answer and to done, each with the number of requests it stands on. In all, it prints how many requests the first lane kept (the routing accuracy) and the mean number of lanes a finished request went through. Ask the conductor "how is routing going?" to run it.
+`node <plugin>/scripts/lane-report.mjs [--days 14] [--json]` prints, per lane, the requests, done, open, moved out, moved in, redone, and the median times to the first answer and to done, each with the number of requests it stands on, and `checked`: the finished requests whose evidence named a check. In all, it prints how many requests the first lane kept (the routing accuracy) and the mean number of lanes a finished request went through. Ask the conductor "how is routing going?" to run it. Below the table it counts the project's commits of the same days by their `Verified:` line, and each guard's decisions from the guard log (blocked, would-block, let through).
 
 Use the report to decide whether to merge or split lanes, and only after a few weeks of data: a figure from a handful of requests says little.
+
+## Verification
+
+These rules come from Anthropic's [How the Claude Code team thinks about verification](https://claude.dev/blog/how-the-claude-code-team-thinks-about-verification/).
+
+**A change cannot edit the rules that judge it.** The guards read `.claude/brain.json` and the covered-files list twice: from the working tree and from every base branch that exists (origin's default branch, `origin/main`, `origin/<each protected branch>`; the local branches only in a repository with no origin). The strictest counts: every covered list, every protected branch, the strictest mode of each guard, only the `Verified:` kinds all accept. A base with no `brain.json` has the default rules. So a change can tighten a rule at once, but loosens it only once it is merged. A commit that changes `brain.json` or a covered list is judged like a covered file: it needs a `Second-Reader:` line. A rename counts as its old path and its new one. A reused message (`--amend --no-edit`, `-C <commit>`) does not count: a line written for another diff says nothing about this one. With no git or no base branch, the working tree counts alone.
+
+A branch the working tree names is one base among the others, never the only judge. Without a covered list on any side, the second reader checks nothing, `brain.json` changes included; the guard modes still take the stricter value. The remote-tracking refs are local refs too (`git update-ref` moves them): this keeps an agent's ordinary commands honest, it is not a security boundary.
+
+Still read from the working tree only: `owner`, `lanesDir` and `guards.log`. They name no rule, and changing them to get past a guard is going around it, like the escape comments or `bash -c` (see "Limits"). In a repository with no origin, a session that moves the local `<protectedBranch>` moves the base.
+
+**Every commit says what was run.** The commit ends with a line among its trailers:
+
+```
+Verified: tests (node --test, 172 pass), second-reader
+Verified: app (drove the sign-in page)
+Verified: none (docs only)
+```
+
+The kinds are `verified.kinds`. A note in brackets is optional; `none` needs its reason. `git log --format='%h %(trailers:key=Verified,valueonly)'` lists them, and `git log --grep='^Verified: none'` finds the unverified commits. The gate reads only real `git commit` commands: the words "git commit" in a PR body, an echo or a heredoc are text. `lane-report.mjs` counts them.
+
+**Guard modes.** `off` does nothing. `observe` logs what the guard would have stopped and stops nothing: read the log for false positives before you set `enforce`. `enforce` stops. A new gate starts in `observe`; the `Verified:` line does. The log is `guards.log`, one JSON line per decision (`blocked`, `would-block`, `let-through`), with the guard, the session and a short reason, never the command.
+
+**No session stuck behind a gate.** A commit gate (the second reader, the `Verified:` line) that blocked one session twice in a row (no commit it passed between, both in the last hour) lets the third try through, logs it, shows the user a warning and tells the agent to name the skipped check in its reply. Then the count starts again. A guard of an action that cannot be undone locally (a push to the protected branch, a lane's PR) never lets through.
+
+**Done means evidence.** `lane-inbox.mjs done` needs `--evidence`: what shows the work is right. The lanes skill adds two rules: verifying means running the change, and after three failed rounds of fixes the lane stops and asks the owner.
 
 ## Retire a lane
 
@@ -182,8 +214,11 @@ A plugin cannot set the status line, and the plugin folder changes with each ver
 |---|---|---|---|
 | `lane-guard.mjs` | UserPromptSubmit | The first message of a new session that matches a lane with a session. On a lane's own messages it stops nothing, and names new inbox requests and due follow-ups once. | Call a model. It matches keywords in code. When two lanes match equally, the message passes. |
 | `second-reader-guard.mjs` | PreToolUse (Bash) | `git commit` of a covered file without a `Second-Reader:` line. | Prove that the read happened. The line is the session's statement. |
+| `verified-guard.mjs` | PreToolUse (Bash) | `git commit` without a usable `Verified:` line. In `observe` mode (the default) it stops nothing and logs the commit. | Check that what the line says was run. It is the session's statement. |
 | `main-push-guard.mjs` | PreToolUse (Bash) | An agent's push that writes to the protected branch. | Stop a push that you type in a terminal. Use server-side protection for that. |
 | `lane-pr-guard.mjs` | PreToolUse (Bash) | `gh pr create` in a lane session without `# lane-pr: ok` (desktop app only). | Anything outside the desktop app. The real fix is the session's own switch: see "Archive switch (desktop app)". |
+
+Each guard has a mode (`guards.<guard>`; see "Verification"). The commit gates let the third try of a session through after two blocks in a row; the push, PR and lane guards never do.
 
 **Limits.** The hooks are guard rails for an agent's ordinary commands, not a security boundary. A command written to get around them can do so: `bash -c "git push origin main"`, a script file, a git alias. Every PreToolUse hook that reads command text has this limit. For a rule that must hold, use server-side protection (GitHub branch protection, required reviews).
 

@@ -51,7 +51,7 @@ describe('lane-inbox.mjs', () => {
     expect(items('ops')[0].status).toBe('pending')
     expect(items('ops')[0].from).toBe('local_c')
     expect(inbox(['list', 'ops']).stdout).toContain('move the backup cron')
-    expect(inbox(['done', 'ops', id]).stdout).toContain(`Marked done: ${id}.`)
+    expect(inbox(['done', 'ops', id, '--evidence', 'tests: ok']).stdout).toContain(`Marked done: ${id}.`)
     expect(items('ops')[0].status).toBe('done')
     expect(inbox(['list', 'ops']).stdout).toContain('no pending requests')
     expect(inbox(['list', 'ops', '--all']).stdout).toContain('(done,')
@@ -71,7 +71,7 @@ describe('lane-inbox.mjs', () => {
     expect(inbox(['add', 'ops'], '   ').stderr).toContain('No request text')
     expect(inbox(['add', 'ops', '--id', '../x'], 'x').status).toBe(1)
     expect(inbox(['add', '../ops'], 'x').status).toBe(1)
-    expect(inbox(['done', 'ops', 'missing']).status).toBe(1)
+    expect(inbox(['done', 'ops', 'missing', '--evidence', 'tests: ok']).status).toBe(1)
   })
 
   it('loses no request when many are added at the same moment (the lock)', async () => {
@@ -203,7 +203,7 @@ describe('second read of 0.5.0', () => {
 
   it('an --id of a done request is refused, not silently "already in the inbox"', () => {
     inbox(['add', 'ops', '--id', 'fixed1'], 'first')
-    inbox(['done', 'ops', 'fixed1'])
+    inbox(['done', 'ops', 'fixed1', '--evidence', 'tests: ok'])
     const r = inbox(['add', 'ops', '--id', 'fixed1'], 'second, different')
     expect(r.status).toBe(1)
     expect(r.stderr).toContain('already done')

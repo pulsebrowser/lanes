@@ -16,17 +16,21 @@
  * Other sessions are not touched; outside the desktop app the variable is unset and the hook does nothing.
  * Escape: put the comment `# lane-pr: ok` in the command once this session's switch is off
  * (`# lane-pr: unbind`, from 0.1.0 to 0.3.1, still works).
+ * Mode `guards.lanePr` (0.6.1): off, observe or enforce, the stricter of the base branch and the working tree.
  * It fails OPEN: on any error of its own the command goes through.
  *
- * Input: hook JSON on stdin ({ tool_name, tool_input: { command } }). Exit 2 blocks; stderr goes to the agent.
+ * Input: hook JSON on stdin ({ tool_name, tool_input: { command }, session_id }). Exit 2 blocks; stderr goes to the agent.
  * Env: CLAUDE_CODE_HOST_SESSION_ID (this session), LANE_REGISTRY (tests: path of lanes.json).
  */
 import { readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { loadBrainConfig } from './brain-config.mjs'
+import { safeRules } from './rules.mjs'
+import { decide } from './guard-mode.mjs'
 
+const CONFIG = loadBrainConfig()
 // the lane registry: `lanesDir` of .claude/brain.json (brain-config.mjs)
-const REGISTRY = process.env.LANE_REGISTRY || path.join(loadBrainConfig().lanesDir, 'lanes.json')
+const REGISTRY = process.env.LANE_REGISTRY || path.join(CONFIG.lanesDir, 'lanes.json')
 // `gh`, `/opt/homebrew/bin/gh`, with global options before `pr` (`gh -R owner/repo pr create`, `gh --repo=x pr new`).
 // The option branches never match the same text, so a long run of options cannot backtrack exponentially.
 const PR_CREATE = /(?:^|[\s;&|(])(?:[^\s;&|()]*\/)?gh(?:\s+(?:-R|--repo)(?:=|\s+)\S+|\s+(?!(?:-R|--repo)(?:=|\s|$))--?[a-zA-Z][\w-]*(?:=\S+)?)*\s+pr\s+(?:create|new)\b/
@@ -44,6 +48,7 @@ function main() {
   const { lanes = [] } = JSON.parse(readFileSync(REGISTRY, 'utf8'))
   const lane = lanes.find((l) => l?.sessionId && l.sessionId === me)
   if (!lane) return 0
+  if (!decide('lanePr', { config: CONFIG, rules: safeRules(CONFIG), session: input.session_id, reason: `gh pr create in the ${lane.slug} lane session` }).block) return 0
 
   process.stderr.write(
     [

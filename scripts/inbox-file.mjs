@@ -47,3 +47,11 @@ export const oneLine = (v, max = 160, more = '...') => {
   const t = String(v ?? '').replace(/\s+/g, ' ').trim()
   return t.length > max ? t.slice(0, max) + more : t
 }
+
+/**
+ * Evidence of the kind "none" (0.6.1): "none", "none: why", "none (why)", "none - why", "none." ... but not a
+ * sentence such as "None of the tests failed", which is evidence. One rule for lane-inbox.mjs and lane-report.mjs.
+ */
+export const isNoneEvidence = (e) => /^none(?=$|[^a-z\s]|\s+[^a-z\s])/i.test(String(e ?? '').trim())
+/** "none" with no reason after it ("none", "none.", "none:"): refused by `done`. */
+export const noneWithoutReason = (e) => isNoneEvidence(e) && !/\w/.test(String(e).trim().slice(4))

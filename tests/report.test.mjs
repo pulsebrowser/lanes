@@ -48,7 +48,7 @@ describe('routing fields', () => {
     const first = items('ops').find((i) => i.id === 'a1').answeredAt
     inbox(['answered', 'ops', 'a1'])
     expect(items('ops').find((i) => i.id === 'a1').answeredAt).toBe(first)
-    inbox(['done', 'ops', 'a1', 'a2'])
+    inbox(['done', 'ops', 'a1', 'a2', '--evidence', 'tests: ok'])
     expect(items('ops').find((i) => i.id === 'a1').answeredWithDone).toBe(undefined)
     expect(items('ops').find((i) => i.id === 'a2').answeredWithDone).toBe(true)
     expect(inbox(['answered', 'ops', 'nope']).status).toBe(1)
@@ -84,11 +84,11 @@ describe('routing fields', () => {
 
   it('redone reopens a done request and counts it', () => {
     inbox(['add', 'ops', '--id', 'd1'], 'x')
-    inbox(['done', 'ops', 'd1'])
+    inbox(['done', 'ops', 'd1', '--evidence', 'tests: ok'])
     expect(status('local_o')).toBe('lane: Ops')
     expect(inbox(['redone', 'ops', 'd1']).stdout).toContain('redone 1x')
     expect(inbox(['redone', 'ops', 'd1']).status).toBe(1) // not done again yet: refused
-    inbox(['done', 'ops', 'd1'])
+    inbox(['done', 'ops', 'd1', '--evidence', 'tests: ok'])
     inbox(['redone', 'ops', 'd1'])
     const i = items('ops')[0]
     expect(i.status).toBe('pending')
@@ -99,7 +99,7 @@ describe('routing fields', () => {
   it('items written before 0.6.0 still list, close and count', () => {
     put('ops', [{ id: 'old1', at: ago(5), from: '', text: 'an old request', status: 'pending' }])
     expect(inbox(['list', 'ops']).stdout).toContain('an old request')
-    expect(inbox(['done', 'ops', 'old1']).status).toBe(0)
+    expect(inbox(['done', 'ops', 'old1', '--evidence', 'tests: ok']).status).toBe(0)
     const out = report().stdout
     expect(out).toContain('Requests: 1. The first lane kept 1 (100%)')
   })
@@ -231,7 +231,7 @@ describe('second read of 0.6.0', () => {
 
   it('one redo is counted once, in the lane where it happened', () => {
     inbox(['add', 'ops', '--id', 'r2'], 'x')
-    inbox(['done', 'ops', 'r2'])
+    inbox(['done', 'ops', 'r2', '--evidence', 'tests: ok'])
     inbox(['redone', 'ops', 'r2'])
     inbox(['reroute', 'ops', 'r2', 'web'])
     const { lanes } = JSON.parse(report(['--json']).stdout)
@@ -266,7 +266,7 @@ describe('second read of 0.6.0', () => {
   it('done or answered on a request that was moved fails and says where it went', () => {
     inbox(['add', 'ops', '--id', 'm1'], 'x')
     inbox(['reroute', 'ops', 'm1', 'web'])
-    const d = inbox(['done', 'ops', 'm1'])
+    const d = inbox(['done', 'ops', 'm1', '--evidence', 'tests: ok'])
     expect(d.status).toBe(1)
     expect(d.stderr).toContain('m1 (moved to web)')
     expect(inbox(['answered', 'ops', 'm1']).stderr).toContain('was moved to web')
